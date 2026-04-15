@@ -54,7 +54,7 @@ export default function BiddingBoard({ roomCode }: { roomCode: string }) {
     try {
       const raw = window.localStorage.getItem(storageKey);
       if (raw) {
-        const parsed = JSON.parse(raw) as Partial<BidState>;
+        const parsed = JSON.parse(raw) as Record<string, BidEntry>;
         setBids({ ...defaultState(), ...parsed });
       }
     } catch {

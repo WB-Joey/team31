@@ -107,7 +107,7 @@ export default function MemberAuctionBoard({
   const revealedHistory = useMemo<RevealedItem[]>(() => {
     return [...state.revealed_ids]
       .reverse()
-      .map((id) => {
+      .map((id): RevealedItem | null => {
         const value = state.values.find((v) => v.id === id);
         if (!value) return null;
         return { value, award: state.awarded[id] ?? null };
