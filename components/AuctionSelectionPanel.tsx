@@ -9,10 +9,12 @@ import {
   recommendedDefaultSelection,
 } from "@/lib/auctionState";
 import type { AuctionValue } from "@/lib/types";
+import type { Participant } from "@/lib/useParticipants";
 
 interface Props {
   initial: AuctionValue[];
   saving: boolean;
+  participants: Participant[];
   onCommit: (values: AuctionValue[]) => Promise<void> | void;
   onCancel?: () => void;
 }
@@ -24,9 +26,12 @@ const TABS: TabKey[] = [...VALUE_CATEGORIES];
 export default function AuctionSelectionPanel({
   initial,
   saving,
+  participants,
   onCommit,
   onCancel,
 }: Props) {
+  const nonLeaderCount = participants.filter((p) => !p.is_leader).length;
+  const recommendedCount = Math.max(1, Math.round(nonLeaderCount * 1.3));
   const [selected, setSelected] = useState<AuctionValue[]>(() =>
     initial.map((v) => ({ ...v })),
   );
@@ -45,9 +50,7 @@ export default function AuctionSelectionPanel({
   );
 
   const valueCount = selected.length;
-  const valueRecLow = 14;
-  const valueRecHigh = 16;
-  const inRecRange = valueCount >= valueRecLow && valueCount <= valueRecHigh;
+  const inRecRange = valueCount === recommendedCount;
 
   function toggle(v: AuctionValue) {
     setSelected((prev) =>
@@ -95,7 +98,7 @@ export default function AuctionSelectionPanel({
   }
 
   function fillRecommended() {
-    setSelected(recommendedDefaultSelection());
+    setSelected(recommendedDefaultSelection(recommendedCount));
   }
 
   function fillAll() {
@@ -122,7 +125,8 @@ export default function AuctionSelectionPanel({
           </span>
         </div>
         <p className="mt-1 text-xs text-gray-500">
-          {valueRecLow}~{valueRecHigh}개가 적당해요.
+          현재 <b className="text-gray-700">{nonLeaderCount}</b>명 참여 중 → 가치관{" "}
+          <b className="text-gray-700">{recommendedCount}</b>개 추천
         </p>
         <div className="mt-3 grid grid-cols-2 gap-2">
           <button

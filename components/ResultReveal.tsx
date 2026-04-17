@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import LadderGame from "./LadderGame";
+import LadderModal from "./LadderModal";
 import SharingGuide from "./SharingGuide";
 import { computeWinner } from "@/lib/auction";
 import { getSupabaseClient } from "@/lib/supabase";
@@ -13,11 +13,8 @@ import {
   type SessionResult,
   type SharingLadder,
 } from "@/lib/types";
-import {
-  useEncouragements,
-  type Encouragement,
-} from "@/lib/useEncouragements";
-import { useReactions } from "@/lib/useReactions";
+import type { Encouragement } from "@/lib/useEncouragements";
+import type { Reaction } from "@/lib/useReactions";
 import { useSharingState } from "@/lib/useSharingState";
 import type { Participant } from "@/lib/useParticipants";
 
@@ -29,6 +26,10 @@ interface Props {
   auctionState: AuctionState;
   myParticipantId: string | null;
   isLeader: boolean;
+  // Reactions and encouragements are subscribed by the parent page so the
+  // leader screen doesn't open a duplicate channel for the LeaderFeedbackCard.
+  reactions: Reaction[];
+  encouragements: Encouragement[];
 }
 
 // Confetti emoji positions — fixed so the animation is consistent across renders.
@@ -49,66 +50,101 @@ function rankBadge(index: number): string {
 }
 
 export default function ResultReveal({
-  content,
   result,
   sessionId,
   participants,
   auctionState,
   myParticipantId,
   isLeader,
+  reactions,
+  encouragements,
 }: Props) {
-  const reactions = useReactions(sessionId);
-  const encouragements = useEncouragements(sessionId);
   const sharing = useSharingState(sessionId);
 
   const rows = result.result_data?.rows ?? [];
   const stats = useMemo(() => computeWinner(rows).stats, [rows]);
 
-  // Optimistic override: undefined means "use server state"; null means
-  // "toggled off"; a ReactionKey means the user just tapped that emoji. Cleared
-  // as soon as realtime catches up.
-  const [pendingEmoji, setPendingEmoji] = useState<
-    ReactionKey | null | undefined
-  >(undefined);
   const [reactionError, setReactionError] = useState<string | null>(null);
 
-  const serverMyReaction = useMemo<ReactionKey | null>(() => {
+  // Reactions + encouragements are keyed by nickname on the server schema.
+  // Derive the current participant's nickname from the live roster.
+  const myNickname = useMemo<string | null>(() => {
     if (!myParticipantId) return null;
-    const mine = reactions
-      .filter((r) => r.participant_id === myParticipantId)
-      .sort((a, b) => b.created_at.localeCompare(a.created_at));
-    return mine[0]?.emoji ?? null;
-  }, [reactions, myParticipantId]);
+    return participants.find((p) => p.id === myParticipantId)?.nickname ?? null;
+  }, [participants, myParticipantId]);
 
-  const myReaction =
-    pendingEmoji !== undefined ? pendingEmoji : serverMyReaction;
-
+  // "My selected emoji" is tracked purely in this device's localStorage so
+  // two tabs on the same browser (or a nickname collision on the server)
+  // can't cause player A's highlight to appear on player B's screen.
+  const myReactionKey = `my_reaction_${sessionId}`;
+  const [myReaction, setMyReaction] = useState<ReactionKey | null>(null);
   useEffect(() => {
-    if (pendingEmoji !== undefined && serverMyReaction === pendingEmoji) {
-      setPendingEmoji(undefined);
+    try {
+      const raw = window.localStorage.getItem(myReactionKey);
+      if (raw === "thumbs_up" || raw === "laugh" || raw === "fire" || raw === "sad") {
+        setMyReaction(raw);
+      }
+    } catch {
+      // Ignore
     }
-  }, [serverMyReaction, pendingEmoji]);
+  }, [myReactionKey]);
 
-  const reactionCounts = useMemo(() => {
+  // DB-derived counts, session-scoped via the useReactions subscription.
+  const dbReactionCounts = useMemo(() => {
     const out: Record<ReactionKey, number> = {
       thumbs_up: 0,
       laugh: 0,
       fire: 0,
       sad: 0,
     };
-    for (const r of reactions) {
-      if (myParticipantId && r.participant_id === myParticipantId) continue;
-      out[r.emoji]++;
-    }
-    if (myReaction) out[myReaction]++;
+    for (const r of reactions) out[r.emoji]++;
     return out;
-  }, [reactions, myParticipantId, myReaction]);
+  }, [reactions]);
+
+  // Display counts are monotonic-by-emoji: they merge optimistic clicks
+  // with whatever DB reports. They never decrease — when the DB stream is
+  // delayed or returns stale data we keep the higher value rather than
+  // letting the UI snap down to 0 between optimistic update and poll.
+  const [displayCounts, setDisplayCounts] = useState<Record<ReactionKey, number>>({
+    thumbs_up: 0,
+    laugh: 0,
+    fire: 0,
+    sad: 0,
+  });
+  useEffect(() => {
+    setDisplayCounts((prev) => ({
+      thumbs_up: Math.max(prev.thumbs_up, dbReactionCounts.thumbs_up),
+      laugh: Math.max(prev.laugh, dbReactionCounts.laugh),
+      fire: Math.max(prev.fire, dbReactionCounts.fire),
+      sad: Math.max(prev.sad, dbReactionCounts.sad),
+    }));
+  }, [dbReactionCounts]);
+  const reactionCounts = displayCounts;
 
   async function toggleReaction(emoji: ReactionKey) {
-    if (!myParticipantId) return;
-    const nextOptimistic: ReactionKey | null =
-      myReaction === emoji ? null : emoji;
-    setPendingEmoji(nextOptimistic);
+    if (!myParticipantId || !myNickname) {
+      console.error(
+        "[reactions] toggle skipped — missing identity",
+        { myParticipantId, myNickname },
+      );
+      return;
+    }
+    const next: ReactionKey | null = myReaction === emoji ? null : emoji;
+    // Optimistic local update + localStorage persistence. Highlight state
+    // never reads from DB, so no other player's click can affect my UI.
+    setMyReaction(next);
+    try {
+      if (next) window.localStorage.setItem(myReactionKey, next);
+      else window.localStorage.removeItem(myReactionKey);
+    } catch {
+      // Ignore
+    }
+    // Optimistic count bump for the chosen emoji — counts are monotonic
+    // (see displayCounts effect) so this can only ever climb, never snap
+    // down, even if the DB poll temporarily returns a smaller number.
+    if (next) {
+      setDisplayCounts((prev) => ({ ...prev, [next]: prev[next] + 1 }));
+    }
     setReactionError(null);
 
     const supabase = getSupabaseClient();
@@ -117,93 +153,103 @@ export default function ResultReveal({
         .from("reactions")
         .delete()
         .eq("session_id", sessionId)
-        .eq("participant_id", myParticipantId);
-      if (delError) throw delError;
+        .eq("participant_nickname", myNickname);
+      if (delError) {
+        console.error("[reactions] delete failed", delError);
+        throw delError;
+      }
 
-      if (nextOptimistic) {
+      if (next) {
         const { error } = await supabase.from("reactions").insert({
           session_id: sessionId,
-          participant_id: myParticipantId,
-          emoji: nextOptimistic,
+          participant_nickname: myNickname,
+          emoji: next,
         });
-        if (error) throw error;
+        if (error) {
+          console.error("[reactions] insert failed", error);
+          throw error;
+        }
       }
     } catch (e) {
       console.error("[reactions] toggle failed", e);
-      setPendingEmoji(undefined);
       setReactionError(
-        "반응을 저장하지 못했어요. 네트워크를 확인하고 다시 시도해주세요.",
+        `반응을 저장하지 못했어요 (${(e as { message?: string })?.message ?? "unknown"})`,
       );
     }
   }
 
   // Encouragement messages — 1 per participant, freeform text.
+  // "Already sent" is tracked in this device's localStorage so a server-side
+  // nickname collision (two browsers resolving to the same identity) can't
+  // make every player's input box collapse the moment one player sends.
+  const messageSentKey = `encouragement_sent_${sessionId}`;
   const [messageDraft, setMessageDraft] = useState("");
-  const [pendingMessage, setPendingMessage] = useState<string | undefined>(
-    undefined,
-  );
+  const [sentMessage, setSentMessage] = useState<string | null>(null);
   const [messageError, setMessageError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
-
-  const serverMyMessage = useMemo<string | null>(() => {
-    if (!myParticipantId) return null;
-    const mine = encouragements
-      .filter((e) => e.participant_id === myParticipantId)
-      .sort((a, b) => b.created_at.localeCompare(a.created_at));
-    return mine[0]?.message ?? null;
-  }, [encouragements, myParticipantId]);
-
-  const myMessage =
-    pendingMessage !== undefined ? pendingMessage : serverMyMessage;
+  const [sendAnonymously, setSendAnonymously] = useState(false);
 
   useEffect(() => {
-    if (pendingMessage !== undefined && serverMyMessage === pendingMessage) {
-      setPendingMessage(undefined);
+    try {
+      const raw = window.localStorage.getItem(messageSentKey);
+      if (raw) setSentMessage(raw);
+    } catch {
+      // Ignore
     }
-  }, [serverMyMessage, pendingMessage]);
-
-  // Newest-first list for the leader's view (anonymous — nickname is never
-  // rendered on the leader screen).
-  const messagesNewestFirst = useMemo(
-    () =>
-      [...encouragements].sort((a, b) =>
-        b.created_at.localeCompare(a.created_at),
-      ),
-    [encouragements],
-  );
+  }, [messageSentKey]);
 
   async function sendMessage() {
-    if (!myParticipantId) return;
+    if (!myParticipantId || !myNickname) {
+      console.error(
+        "[encouragements] send skipped — missing identity",
+        { myParticipantId, myNickname },
+      );
+      return;
+    }
+    if (sentMessage) return;
     const trimmed = messageDraft.trim();
     if (!trimmed) return;
     setSending(true);
     setMessageError(null);
-    setPendingMessage(trimmed);
 
     const supabase = getSupabaseClient();
     try {
-      const { error: delError } = await supabase
-        .from("encouragements")
-        .delete()
-        .eq("session_id", sessionId)
-        .eq("participant_id", myParticipantId);
-      if (delError) throw delError;
-
+      // No DELETE first — multiple players may legitimately share a nickname
+      // resolution on this device, so we never want to wipe somebody else's
+      // message. INSERT only.
       const { error } = await supabase.from("encouragements").insert({
         session_id: sessionId,
-        participant_id: myParticipantId,
+        participant_nickname: sendAnonymously ? "익명" : myNickname,
         message: trimmed,
       });
-      if (error) throw error;
-      setMessageDraft("");
+      if (error) {
+        console.error("[encouragements] insert failed", error);
+        throw error;
+      }
+      setSentMessage(trimmed);
+      try {
+        window.localStorage.setItem(messageSentKey, trimmed);
+      } catch {
+        // Ignore
+      }
     } catch (e) {
       console.error("[encouragements] send failed", e);
-      setPendingMessage(undefined);
       setMessageError(
-        "메시지를 전달하지 못했어요. 잠시 후 다시 시도해주세요.",
+        `메시지를 전달하지 못했어요 (${(e as { message?: string })?.message ?? "unknown"})`,
       );
     } finally {
       setSending(false);
+    }
+  }
+
+  function resendMessage() {
+    setSentMessage(null);
+    setMessageDraft("");
+    setMessageError(null);
+    try {
+      window.localStorage.removeItem(messageSentKey);
+    } catch {
+      // Ignore
     }
   }
 
@@ -256,13 +302,6 @@ export default function ResultReveal({
     if (prev === currentSpeakerId) return;
     if (currentSpeakerId !== myParticipantId) return;
 
-    // The person who picked me is the previous entry in the sharing order,
-    // or the leader if I'm the first speaker.
-    const idx = sharing.index;
-    const pickerId = idx > 0 ? sharingOrder[idx - 1] : null;
-    const pickerName = pickerId ? nameById.get(pickerId) ?? "리더" : "리더";
-
-    setPickedPopup({ pickerName });
     if (typeof navigator !== "undefined" && "vibrate" in navigator) {
       try {
         navigator.vibrate([200, 100, 200]);
@@ -270,99 +309,133 @@ export default function ResultReveal({
         // Silent — vibrate is best-effort.
       }
     }
-  }, [currentSpeakerId, myParticipantId, sharing.index, sharingOrder, nameById]);
+
+    // Random (roulette) path: no second popup. The LadderModal already showed
+    // the reveal; auto-scroll the picked member to the sharing guide when the
+    // modal dismounts (which is what flips currentSpeakerId for them).
+    if (sharing.method === "random") {
+      requestAnimationFrame(() => {
+        document.getElementById("sharing-guide")?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      });
+      return;
+    }
+
+    // Manual pick: the picker is the previous entry in the sharing order, or
+    // the leader if I'm the first speaker.
+    const idx = sharing.index;
+    const pickerId = idx > 0 ? sharingOrder[idx - 1] : null;
+    const pickerName = pickerId ? nameById.get(pickerId) ?? "리더" : "리더";
+
+    setPickedPopup({ pickerName });
+  }, [
+    currentSpeakerId,
+    myParticipantId,
+    sharing.index,
+    sharing.method,
+    sharingOrder,
+    nameById,
+  ]);
 
   async function startLadder() {
     if (nonLeaderParticipants.length === 0) return;
-    const cols = nonLeaderParticipants.length;
-    const rows = Math.max(5, Math.min(8, cols + 2));
     const shuffled = [...nonLeaderParticipants]
       .sort(() => Math.random() - 0.5)
       .map((p) => p.id);
+    const winner_id =
+      shuffled[Math.floor(Math.random() * shuffled.length)];
 
-    const rungs: { row: number; col: number }[] = [];
-    for (let r = 0; r < rows; r++) {
-      let skip = -2;
-      for (let c = 0; c < cols - 1; c++) {
-        if (c === skip + 1) continue;
-        if (Math.random() < 0.55) {
-          rungs.push({ row: r, col: c });
-          skip = c;
-        }
-      }
-    }
-
-    const start_col = Math.floor(Math.random() * cols);
-    let col = start_col;
-    for (let r = 0; r < rows; r++) {
-      if (rungs.some((x) => x.col === col && x.row === r)) col = col + 1;
-      else if (rungs.some((x) => x.col === col - 1 && x.row === r))
-        col = col - 1;
-    }
-    const winner_id = shuffled[col];
-
+    // rungs/rows/start_col are legacy ladder fields kept for type
+    // compatibility; the roulette wheel only consumes candidates, winner_id,
+    // started_at, and duration_ms.
     const ladderData: SharingLadder = {
       candidates: shuffled,
-      rungs,
-      rows,
-      start_col,
+      rungs: [],
+      rows: 0,
+      start_col: 0,
       winner_id,
       started_at: new Date().toISOString(),
       duration_ms: 4000,
     };
     const supabase = getSupabaseClient();
-    await supabase
+    const { error } = await supabase
       .from("sessions")
-      .update({ sharing_ladder: ladderData })
+      .update({
+        sharing_state: {
+          order: null,
+          index: 0,
+          ladder: ladderData,
+          method: "random",
+        },
+      })
       .eq("id", sessionId);
+    if (error) console.error("[sharing] startLadder failed", error);
   }
 
-  // Leader is authoritative for committing the ladder winner into sharing_order
-  // once the animation time elapses.
-  const ladderCommittedRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!isLeader) return;
+  // Leader commits the ladder winner into sharing_state when they tap [확인]
+  // on the modal. The auto-timer that used to do this was removed so members
+  // see the result before the modal disappears for everyone.
+  async function commitLadderWinner() {
     if (!ladder) return;
-    if (ladderCommittedRef.current === ladder.started_at) return;
-    const elapsed = Date.now() - new Date(ladder.started_at).getTime();
-    const remaining = Math.max(0, ladder.duration_ms - elapsed) + 400;
-    const t = setTimeout(async () => {
-      ladderCommittedRef.current = ladder.started_at;
-      const supabase = getSupabaseClient();
-      await supabase
-        .from("sessions")
-        .update({
-          sharing_order: [ladder.winner_id],
-          sharing_index: 0,
-          sharing_ladder: null,
-        })
-        .eq("id", sessionId);
-    }, remaining);
-    return () => clearTimeout(t);
-  }, [ladder, isLeader, sessionId]);
+    const supabase = getSupabaseClient();
+    const { error } = await supabase
+      .from("sessions")
+      .update({
+        sharing_state: {
+          order: [ladder.winner_id],
+          index: 0,
+          ladder: null,
+          method: "random",
+        },
+      })
+      .eq("id", sessionId);
+    if (error) console.error("[sharing] ladder commit failed", error);
+  }
 
   async function pickFirstSpeaker(participantId: string) {
     const supabase = getSupabaseClient();
-    await supabase
+    const { error } = await supabase
       .from("sessions")
       .update({
-        sharing_order: [participantId],
-        sharing_index: 0,
-        sharing_ladder: null,
+        sharing_state: {
+          order: [participantId],
+          index: 0,
+          ladder: null,
+          method: "manual",
+        },
       })
       .eq("id", sessionId);
+    if (error) console.error("[sharing] pickFirstSpeaker failed", error);
+  }
+
+  async function resetSharing() {
+    const supabase = getSupabaseClient();
+    const { error } = await supabase
+      .from("sessions")
+      .update({
+        sharing_state: { order: null, index: 0, ladder: null, method: null },
+      })
+      .eq("id", sessionId);
+    if (error) console.error("[sharing] reset failed", error);
   }
 
   async function pickNextSpeaker(participantId: string) {
     const nextOrder = [...sharingOrder, participantId];
     const supabase = getSupabaseClient();
-    await supabase
+    const { error } = await supabase
       .from("sessions")
       .update({
-        sharing_order: nextOrder,
-        sharing_index: nextOrder.length - 1,
+        sharing_state: {
+          order: nextOrder,
+          index: nextOrder.length - 1,
+          ladder: null,
+          method: "manual",
+        },
       })
       .eq("id", sessionId);
+    if (error) console.error("[sharing] pickNextSpeaker failed", error);
   }
 
   return (
@@ -523,73 +596,82 @@ export default function ResultReveal({
         )}
       </section>
 
-      {/* Encouragement messages */}
-      <section className="relative mt-6">
-        <h2 className="text-sm font-semibold text-gray-700 mb-3">
-          💌 리더에게 한마디
-        </h2>
+      {/* Encouragement messages — members only. The leader reads arriving
+          messages inside the 팀 피드백 레포트 card rendered by the page. */}
+      {!isLeader && (
+        <section className="relative mt-6">
+          <h2 className="text-sm font-semibold text-gray-700 mb-3">
+            💌 리더에게 한마디
+          </h2>
 
-        {isLeader ? (
-          <div className="space-y-2">
-            {messagesNewestFirst.length === 0 ? (
-              <p className="text-sm text-gray-400 bg-gray-50 rounded-xl p-6 text-center">
-                팀원이 메시지를 보내면 실시간으로 도착해요
-              </p>
-            ) : (
-              <ul className="space-y-2">
-                {messagesNewestFirst.map((m, i) => (
-                  <EncouragementCard key={m.id} message={m} isLatest={i === 0} />
-                ))}
-              </ul>
-            )}
-          </div>
-        ) : myParticipantId ? (
-          myMessage ? (
-            <div className="rounded-2xl bg-gradient-to-br from-emerald-50 to-emerald-100 border border-emerald-200 p-5 text-center">
-              <p className="text-base font-bold text-emerald-700">
-                💌 전달됐어요!
-              </p>
-              <p className="mt-2 text-sm text-emerald-800 italic">
-                “{myMessage}”
-              </p>
-              <p className="mt-3 text-[11px] text-emerald-600">
-                리더님께 익명으로 전달되었어요
-              </p>
+          {myParticipantId ? (
+            <div className="space-y-2">
+              {sentMessage ? (
+                <>
+                  <div className="rounded-2xl bg-gradient-to-br from-emerald-50 to-emerald-100 border border-emerald-200 p-4 text-center">
+                    <p className="text-base font-bold text-emerald-700">
+                      💌 전달됐어요!
+                    </p>
+                    <p className="mt-1.5 text-sm text-emerald-800 italic">
+                      “{sentMessage}”
+                    </p>
+                    <p className="mt-2 text-[11px] text-emerald-600">
+                      리더님께 전달되었어요
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={resendMessage}
+                    className="w-full rounded-2xl border border-emerald-300 bg-white hover:bg-emerald-50 text-emerald-700 font-semibold py-3 text-sm"
+                  >
+                    ✏️ 다시 보내기
+                  </button>
+                </>
+              ) : (
+                <>
+                  <textarea
+                    value={messageDraft}
+                    onChange={(e) => setMessageDraft(e.target.value)}
+                    placeholder="리더에게 격려의 한 마디 부탁드립니다 :)"
+                    rows={3}
+                    maxLength={200}
+                    className="w-full rounded-2xl border border-gray-200 bg-white p-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-300 resize-none"
+                  />
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={sendAnonymously}
+                      onChange={(e) => setSendAnonymously(e.target.checked)}
+                      className="w-4 h-4 accent-brand-500"
+                    />
+                    <span className="text-xs text-gray-600">익명으로 보내기</span>
+                  </label>
+                  <p className="text-[11px] text-gray-400">
+                    200자 이내 · 여러 번 보낼 수 있어요
+                  </p>
+                  {messageError && (
+                    <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-center">
+                      {messageError}
+                    </p>
+                  )}
+                  <button
+                    type="button"
+                    onClick={sendMessage}
+                    disabled={sending || !messageDraft.trim()}
+                    className="w-full rounded-2xl bg-brand-500 hover:bg-brand-600 disabled:opacity-40 text-white font-semibold py-3 text-sm shadow-sm"
+                  >
+                    {sending ? "전달 중…" : "보내기"}
+                  </button>
+                </>
+              )}
             </div>
           ) : (
-            <div className="space-y-2">
-              <textarea
-                value={messageDraft}
-                onChange={(e) => setMessageDraft(e.target.value)}
-                placeholder="리더에게 격려의 한 마디 부탁드립니다 :)"
-                rows={3}
-                maxLength={200}
-                className="w-full rounded-2xl border border-gray-200 bg-white p-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand-300 resize-none"
-              />
-              <p className="text-[11px] text-gray-400">
-                익명으로 전달돼요 · 200자 이내 · 한 번만 보낼 수 있어요
-              </p>
-              {messageError && (
-                <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-center">
-                  {messageError}
-                </p>
-              )}
-              <button
-                type="button"
-                onClick={sendMessage}
-                disabled={sending || !messageDraft.trim()}
-                className="w-full rounded-2xl bg-brand-500 hover:bg-brand-600 disabled:opacity-40 text-white font-semibold py-3 text-sm shadow-sm"
-              >
-                {sending ? "전달 중…" : "보내기"}
-              </button>
-            </div>
-          )
-        ) : (
-          <p className="text-sm text-gray-400 bg-gray-50 rounded-xl p-4 text-center">
-            팀원으로 입장하면 메시지를 보낼 수 있어요
-          </p>
-        )}
-      </section>
+            <p className="text-sm text-gray-400 bg-gray-50 rounded-xl p-4 text-center">
+              팀원으로 입장하면 메시지를 보낼 수 있어요
+            </p>
+          )}
+        </section>
+      )}
 
       {/* Sharing time */}
       <section className="relative mt-6">
@@ -598,7 +680,11 @@ export default function ResultReveal({
         </h2>
 
         {ladder ? (
-          <LadderGame ladder={ladder} nameById={nameById} />
+          <div className="rounded-2xl bg-white border border-gray-200 p-5 text-center">
+            <p className="text-base font-semibold text-gray-800">
+              🎤 {nameById.get(ladder.winner_id) ?? "?"}님의 나눔을 기대해주세요!
+            </p>
+          </div>
         ) : sharingOrder.length === 0 ? (
           <FirstSpeakerPicker
             isLeader={isLeader}
@@ -607,10 +693,21 @@ export default function ResultReveal({
             onPickDirect={pickFirstSpeaker}
           />
         ) : sharingDone ? (
-          <div className="rounded-2xl bg-white border border-gray-200 p-5 text-center">
-            <p className="text-sm text-gray-700 font-medium">
-              나눔이 모두 끝났어요 🙂
+          <div className="rounded-2xl bg-white border border-gray-200 p-5 text-center space-y-3">
+            <p className="text-base text-gray-800 font-semibold leading-relaxed">
+              🎉 나눔이 모두 끝났어요!
+              <br />
+              오늘 가치관 경매, 모두 수고하셨어요 😊
             </p>
+            {isLeader && (
+              <button
+                type="button"
+                onClick={resetSharing}
+                className="w-full rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium py-2.5 text-sm"
+              >
+                🔄 나눔 다시 시작
+              </button>
+            )}
           </div>
         ) : (
           <div className="space-y-3">
@@ -624,17 +721,23 @@ export default function ResultReveal({
             >
               {isMyTurn ? (
                 <>
-                  <p className="text-sm opacity-90 mb-1">🎤 지금은</p>
-                  <p className="text-2xl font-extrabold">
-                    내 차례예요!
+                  <p className="text-sm opacity-90 mb-1">
+                    {sharing.method === "random"
+                      ? "🎰 돌림판으로 선정됐어요!"
+                      : "🎤 리더님이 지목했어요!"}
                   </p>
+                  <p className="text-2xl font-extrabold">내 차례예요!</p>
                   <p className="mt-2 text-xs opacity-90">
                     준비되면 팀에게 나눔을 시작해주세요
                   </p>
                 </>
               ) : (
                 <>
-                  <p className="text-xs opacity-90 mb-1">🎤 지금은</p>
+                  <p className="text-xs opacity-90 mb-1">
+                    {sharing.method === "random"
+                      ? `🎰 ${currentSpeaker?.nickname ?? "알 수 없음"}님이 돌림판으로 선정됐어요!`
+                      : `🎤 ${currentSpeaker?.nickname ?? "알 수 없음"}님이 지목됐어요!`}
+                  </p>
                   <p className="text-2xl font-extrabold">
                     {currentSpeaker?.nickname ?? "알 수 없음"}님 차례예요!
                   </p>
@@ -642,12 +745,7 @@ export default function ResultReveal({
               )}
             </div>
 
-            {currentSpeaker && (
-              <SharingGuide
-                speaker={currentSpeaker}
-                auctionState={auctionState}
-              />
-            )}
+            {currentSpeaker && <SharingGuide />}
 
             {sharingOrder.length > 1 && (
               <div className="rounded-2xl bg-white border border-gray-200 p-3">
@@ -684,51 +782,33 @@ export default function ResultReveal({
         )}
       </section>
 
-      <p className="relative mt-10 text-center text-xs text-gray-400">
-        {content.title} · 모두 수고하셨어요 🙂
-      </p>
-
       {pickedPopup && (
         <PickedPopup
           pickerName={pickedPopup.pickerName}
-          onClose={() => setPickedPopup(null)}
+          myNickname={myNickname ?? "회원"}
+          onClose={() => {
+            setPickedPopup(null);
+            requestAnimationFrame(() => {
+              document.getElementById("sharing-guide")?.scrollIntoView({
+                behavior: "smooth",
+                block: "start",
+              });
+            });
+          }}
+        />
+      )}
+
+      {ladder && (
+        <LadderModal
+          ladder={ladder}
+          nameById={nameById}
+          isLeader={isLeader}
+          myParticipantId={myParticipantId}
+          onConfirm={commitLadderWinner}
+          onRerun={startLadder}
         />
       )}
     </div>
-  );
-}
-
-function EncouragementCard({
-  message,
-  isLatest,
-}: {
-  message: Encouragement;
-  isLatest: boolean;
-}) {
-  return (
-    <li
-      className={[
-        "rounded-2xl p-4 shadow-sm",
-        isLatest
-          ? "bg-gradient-to-br from-brand-500 to-brand-600 text-white"
-          : "bg-white border border-gray-200 text-gray-800",
-      ].join(" ")}
-    >
-      {isLatest && (
-        <p className="text-[11px] opacity-90 mb-1">✨ 방금 전 · 익명</p>
-      )}
-      {!isLatest && (
-        <p className="text-[11px] text-gray-400 mb-1">익명</p>
-      )}
-      <p
-        className={[
-          "text-base font-semibold whitespace-pre-wrap break-words",
-          isLatest ? "" : "text-gray-800",
-        ].join(" ")}
-      >
-        {message.message}
-      </p>
-    </li>
   );
 }
 
@@ -775,7 +855,7 @@ function FirstSpeakerPicker({
           onClick={onStartLadder}
           className="rounded-2xl bg-gradient-to-br from-brand-500 to-brand-600 hover:from-brand-600 hover:to-brand-700 text-white font-bold py-4 text-sm shadow-sm"
         >
-          🎲 랜덤으로 뽑기
+          🎰 돌리기
         </button>
         <button
           type="button"
@@ -881,9 +961,11 @@ function NextSpeakerPicker({
 
 function PickedPopup({
   pickerName,
+  myNickname,
   onClose,
 }: {
   pickerName: string;
+  myNickname: string;
   onClose: () => void;
 }) {
   return (
@@ -894,11 +976,8 @@ function PickedPopup({
     >
       <div className="w-full max-w-sm rounded-3xl bg-white p-7 text-center shadow-2xl animate-pop-in">
         <p className="text-4xl mb-3">🎤</p>
-        <p className="text-lg font-extrabold text-gray-900">
-          {pickerName}님이
-        </p>
         <p className="text-lg font-extrabold text-brand-600">
-          회원님을 지목했어요!
+          {pickerName}님이 {myNickname}님을 지목했어요!
         </p>
         <p className="mt-3 text-sm text-gray-500">
           준비되면 팀에게 나눔을 시작해주세요
@@ -908,7 +987,7 @@ function PickedPopup({
           onClick={onClose}
           className="mt-6 w-full rounded-2xl bg-gradient-to-br from-brand-500 to-brand-600 hover:from-brand-600 hover:to-brand-700 text-white font-bold py-3.5 text-base shadow"
         >
-          확인
+          나눔 시작
         </button>
       </div>
     </div>

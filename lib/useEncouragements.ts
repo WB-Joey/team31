@@ -3,19 +3,18 @@
 import { useEffect, useState } from "react";
 import { getSupabaseClient } from "./supabase";
 
+// Row shape matches the Supabase table:
+//   encouragements(id, session_id, participant_nickname, message, created_at)
 export interface Encouragement {
   id: string;
   session_id: string;
-  participant_id: string;
+  participant_nickname: string;
   message: string;
   created_at: string;
 }
 
 const POLL_INTERVAL_MS = 4000;
 
-// Fetches encouragement rows for a session and subscribes to INSERT/DELETE.
-// 1-per-person is enforced at the application layer. Polling guards against
-// Realtime outages so the leader view still converges.
 export function useEncouragements(sessionId: string | null) {
   const [encouragements, setEncouragements] = useState<Encouragement[]>([]);
 
@@ -36,7 +35,7 @@ export function useEncouragements(sessionId: string | null) {
         .order("created_at", { ascending: true });
       if (cancelled) return;
       if (error) {
-        console.warn("[encouragements] refetch failed", error);
+        console.error("[encouragements] refetch failed", error);
         return;
       }
       setEncouragements((data ?? []) as Encouragement[]);
@@ -44,8 +43,9 @@ export function useEncouragements(sessionId: string | null) {
 
     refetch();
 
+    const channelName = `encouragements:${sessionId}:${Math.random().toString(36).slice(2, 10)}`;
     const channel = supabase
-      .channel(`encouragements:${sessionId}`)
+      .channel(channelName)
       .on(
         "postgres_changes",
         {
@@ -77,6 +77,13 @@ export function useEncouragements(sessionId: string | null) {
       .subscribe((status, err) => {
         console.log(`[encouragements] channel status: ${status}`);
         if (err) console.warn("[encouragements] channel error", err);
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.error(
+            "[encouragements] realtime unavailable — run supabase/stage11_migration.sql " +
+              "to add `encouragements` to the supabase_realtime publication. " +
+              "Polling fallback will still keep messages in sync every 4s.",
+          );
+        }
       });
 
     const pollId = setInterval(refetch, POLL_INTERVAL_MS);
@@ -84,7 +91,7 @@ export function useEncouragements(sessionId: string | null) {
     return () => {
       cancelled = true;
       clearInterval(pollId);
-      supabase.removeChannel(channel);
+      supabase.removeChannel(channel).catch(() => {});
     };
   }, [sessionId]);
 

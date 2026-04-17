@@ -327,6 +327,7 @@ export default function LeaderAuctionBoard({
       <AuctionSelectionPanel
         initial={state.values}
         saving={saving}
+        participants={participants}
         onCommit={commitSelection}
         onCancel={reselecting ? () => setReselecting(false) : undefined}
       />
@@ -554,6 +555,18 @@ function CurrentCard({
 }) {
   const top3 = bidders.slice(0, 3);
   const previewAmount = Number(awardAmount) || 0;
+
+  const selectedBidder = awardName
+    ? bidders.find((b) => b.participant.nickname === awardName)
+    : null;
+  const hasTie =
+    !!selectedBidder &&
+    bidders.some(
+      (b) =>
+        b.participant.nickname !== awardName &&
+        b.bid.amount === selectedBidder.bid.amount,
+    );
+
   return (
     <div className="rounded-2xl text-white p-5 shadow-sm animate-pop-in bg-gradient-to-br from-brand-500 to-brand-600">
       <p className="text-xs opacity-80">지금 공개 중</p>
@@ -667,12 +680,27 @@ function CurrentCard({
             100만원 단위
           </p>
         </div>
+        {hasTie && (
+          <div className="rounded-lg bg-amber-50 border border-amber-300 px-3 py-2 text-center">
+            <p className="text-xs font-semibold text-amber-800">
+              ⚠️ 동일한 입찰금액이 있어요!
+            </p>
+            <p className="text-[11px] text-amber-700 mt-0.5">
+              팀원들이 금액을 조정할 때까지 기다려주세요.
+            </p>
+          </div>
+        )}
         <div className="flex gap-2">
           <button
             type="button"
             onClick={onAward}
-            disabled={saving}
-            className="flex-1 rounded-xl font-semibold py-2.5 disabled:opacity-60 bg-white text-brand-700"
+            disabled={saving || hasTie}
+            className={[
+              "flex-1 rounded-xl font-semibold py-2.5 disabled:opacity-60",
+              hasTie
+                ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                : "bg-white text-brand-700",
+            ].join(" ")}
           >
             낙찰 확정
           </button>

@@ -23,6 +23,7 @@ export default function LeaderPlayPage({
   const [notFound, setNotFound] = useState(false);
   const [tab, setTab] = useState<Tab>("auction");
   const [copied, setCopied] = useState(false);
+  const [timerDone, setTimerDone] = useState(false);
 
   useEffect(() => {
     const supabase = getSupabaseClient();
@@ -175,7 +176,12 @@ export default function LeaderPlayPage({
           {tab === "guide" && (
             <ValuesAuctionGuide valuesCount={auctionState.values.length} />
           )}
-          {tab === "timer" && <Timer />}
+          {tab === "timer" && (
+            <Timer
+              blinking={timerDone}
+              onDone={() => setTimerDone(true)}
+            />
+          )}
           {tab === "stopwatch" && <Stopwatch />}
         </div>
       </section>
@@ -186,7 +192,45 @@ export default function LeaderPlayPage({
       >
         결과 입력하기
       </Link>
+
+      {timerDone && (
+        <TimerDonePopup onClose={() => setTimerDone(false)} />
+      )}
     </main>
+  );
+}
+
+function TimerDonePopup({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    if (typeof navigator !== "undefined" && "vibrate" in navigator) {
+      try {
+        navigator.vibrate([200, 100, 200]);
+      } catch {
+        // Vibrate is best-effort.
+      }
+    }
+  }, []);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4 animate-fade-in"
+      role="dialog"
+      aria-modal="true"
+    >
+      <div className="w-full max-w-sm rounded-3xl bg-white shadow-2xl p-6 text-center animate-pop-in">
+        <p className="text-5xl mb-3">🔔</p>
+        <h2 className="text-xl font-extrabold text-gray-900">
+          타이머가 종료됐어요!
+        </h2>
+        <button
+          type="button"
+          onClick={onClose}
+          className="mt-5 w-full rounded-2xl bg-brand-500 hover:bg-brand-600 active:bg-brand-700 text-white font-semibold py-3.5 text-base shadow-sm"
+        >
+          확인
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -213,52 +257,195 @@ function TabButton({
   );
 }
 
-const PROGRESS_STEPS = [
-  "팀원들에게 룸코드 공유 (초대 메시지 복사 버튼 활용)",
-  "팀원 전원 입장 확인",
-  "가치관 목록 편집 (필요시)",
-  "경매 시작 선언",
-  "가치관을 하나씩 공개 (직접 선택 or 랜덤 뽑기)",
-  "팀원들 입찰 확정 대기",
-  "최고 입찰자 확인 후 낙찰 확정",
-  "모든 가치관 진행 후 경매 종료",
-  "결과 공개 → 나눔 시간",
-];
-
-const CAUTIONS = [
-  "팀원들이 입찰 확정 버튼을 눌러야 리더 화면에 반영돼요",
-  "낙찰가는 최고 입찰가를 참고해서 입력해주세요",
-  "예산이 부족한 팀원은 입찰이 제한될 수 있어요",
-  "나눔 시간은 레포트를 보며 진행하면 더 풍성해요",
-];
+type GuideSubTab = "mc" | "game";
 
 function ValuesAuctionGuide({ valuesCount }: { valuesCount: number }) {
+  const [sub, setSub] = useState<GuideSubTab>("mc");
+
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
+        <button
+          type="button"
+          onClick={() => setSub("mc")}
+          className={[
+            "flex-1 py-2 rounded-lg text-sm font-medium transition",
+            sub === "mc" ? "bg-white shadow-sm text-gray-900" : "text-gray-500",
+          ].join(" ")}
+        >
+          🎤 MC 진행 가이드
+        </button>
+        <button
+          type="button"
+          onClick={() => setSub("game")}
+          className={[
+            "flex-1 py-2 rounded-lg text-sm font-medium transition",
+            sub === "game" ? "bg-white shadow-sm text-gray-900" : "text-gray-500",
+          ].join(" ")}
+        >
+          📖 경매 게임 가이드
+        </button>
+      </div>
+
+      {sub === "mc" ? <MCGuide /> : <GameGuide valuesCount={valuesCount} />}
+    </div>
+  );
+}
+
+function MCGuide() {
+  const sections: { title: string; items: (string | { quote: string })[] }[] = [
+    {
+      title: "시작 전",
+      items: [
+        "팀원들에게 초대 링크/룸코드 공유",
+        "전원 입장 확인 후 시작 선언",
+        {
+          quote:
+            "오늘은 가치관 경매를 진행할게요! 각자 1억원의 예산으로 소중한 가치를 낙찰받는 게임이에요 😊",
+        },
+      ],
+    },
+    {
+      title: "가치 공개 & 입찰",
+      items: [
+        "가치를 하나씩 공개 (직접 선택 or 랜덤 뽑기)",
+        {
+          quote:
+            "지금 공개된 가치는 OOO입니다. 이 가치, 얼마에 입찰하시겠어요?",
+        },
+        "팀원들 입찰 확정 대기 → 최고 입찰자 확인",
+        { quote: "더 올리실 분 없으신가요? 없으시면 낙찰 처리할게요!" },
+        "낙찰 확정 후 다음 가치로 이동",
+      ],
+    },
+    {
+      title: "경매 종료 후",
+      items: [
+        { quote: "모든 경매가 끝났어요! 결과를 공개할게요 🎉" },
+        "결과 공개 버튼 클릭",
+        { quote: "우승자는 OOO님입니다! 축하해요 👏" },
+      ],
+    },
+    {
+      title: "리더에게 한마디",
+      items: [
+        {
+          quote:
+            "오늘 함께해줘서 감사해요! 리더에게 따뜻한 한마디 남겨주세요 😊",
+        },
+        "팀원들 메시지 전송 유도",
+      ],
+    },
+    {
+      title: "나눔 시간",
+      items: [
+        {
+          quote:
+            "이제 나눔 시간이에요. 돌림판으로 첫 번째 나눔자를 뽑을게요!",
+        },
+        "돌림판 돌리기 → 선정된 사람부터 나눔 시작",
+        "나눔 완료 후 다음 사람 지목",
+        { quote: "레포트 사진으로 저장해서 팀 방에 공유해주세요 📸" },
+      ],
+    },
+  ];
+
   return (
     <div className="rounded-2xl bg-white border border-gray-200 p-5 text-sm leading-relaxed space-y-5">
+      <h3 className="text-base font-bold">🎤 MC 진행 흐름</h3>
+      {sections.map((section) => (
+        <section key={section.title}>
+          <p className="text-xs font-semibold text-brand-700 mb-2">
+            [{section.title}]
+          </p>
+          <ul className="space-y-1.5">
+            {section.items.map((item, i) =>
+              typeof item === "string" ? (
+                <li key={i} className="flex gap-2 text-gray-700">
+                  <span className="shrink-0 text-brand-500">•</span>
+                  <span>{item}</span>
+                </li>
+              ) : (
+                <li
+                  key={i}
+                  className="rounded-xl bg-brand-50 border border-brand-100 px-3 py-2 text-sm text-gray-800 italic"
+                >
+                  “{item.quote}”
+                </li>
+              ),
+            )}
+          </ul>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function GameGuide({ valuesCount }: { valuesCount: number }) {
+  const rules = [
+    "모든 팀원에게 1억원의 가상 예산이 주어져요",
+    "리더가 가치관을 하나씩 공개해요",
+    "원하는 가치관이 나오면 입찰 금액을 설정하고 [입찰 확정] 버튼을 눌러요",
+    "가장 높은 금액을 입찰한 사람이 낙찰받아요",
+    "낙찰에 실패하면 입찰 금액은 돌려받아요",
+    "예산을 아껴서 정말 소중한 가치관에 집중 투자하세요!",
+  ];
+
+  const tips = [
+    "모든 가치관을 다 사려고 하면 예산이 부족해요",
+    "내가 정말 소중하게 여기는 가치관에 집중하세요",
+    "다른 사람의 입찰 금액을 보며 전략을 세워보세요",
+  ];
+
+  return (
+    <div className="rounded-2xl bg-white border border-gray-200 p-5 text-sm leading-relaxed space-y-5">
+      <h3 className="text-base font-bold">📖 가치관 경매 게임 가이드</h3>
+
       <section>
-        <h3 className="text-base font-bold mb-2">📋 진행 순서</h3>
-        <ol className="space-y-1.5">
-          {PROGRESS_STEPS.map((step, i) => (
-            <li key={i} className="flex gap-2 text-gray-700">
-              <span className="shrink-0 text-brand-600 font-semibold tabular-nums">
-                {i + 1}.
-              </span>
-              <span>{step}</span>
-            </li>
-          ))}
-        </ol>
+        <p className="text-xs font-semibold text-gray-500 mb-1.5">게임 목표</p>
+        <p className="text-gray-700">
+          각자에게 소중한 가치관을 경매로 낙찰받는 활동이에요.
+          <br />
+          내가 무엇을 가장 소중히 여기는지 발견할 수 있어요!
+        </p>
       </section>
 
       <section>
-        <h3 className="text-base font-bold mb-2">⚠️ 주의사항</h3>
+        <p className="text-xs font-semibold text-gray-500 mb-2">기본 규칙</p>
         <ul className="space-y-1.5">
-          {CAUTIONS.map((c, i) => (
+          {rules.map((r, i) => (
             <li key={i} className="flex gap-2 text-gray-700">
-              <span className="shrink-0 text-amber-500">•</span>
-              <span>{c}</span>
+              <span className="shrink-0 text-brand-500">•</span>
+              <span>{r}</span>
             </li>
           ))}
         </ul>
+      </section>
+
+      <section>
+        <p className="text-xs font-semibold text-gray-500 mb-2">팁</p>
+        <ul className="space-y-1.5">
+          {tips.map((t, i) => (
+            <li key={i} className="flex gap-2 text-gray-700">
+              <span className="shrink-0">💡</span>
+              <span>{t}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section>
+        <p className="text-xs font-semibold text-gray-500 mb-2">승리 조건</p>
+        <ol className="space-y-1.5">
+          <li className="flex gap-2 text-gray-700">
+            <span className="shrink-0 font-semibold text-brand-600">1순위.</span>
+            <span>가장 많은 가치관을 낙찰받은 사람</span>
+          </li>
+          <li className="flex gap-2 text-gray-700">
+            <span className="shrink-0 font-semibold text-brand-600">2순위.</span>
+            <span>동률 시: 총 사용 금액이 적은 사람 (효율적 입찰)</span>
+          </li>
+        </ol>
       </section>
 
       <section className="rounded-xl bg-brand-50 border border-brand-100 px-4 py-3 text-center">
@@ -275,11 +462,19 @@ const TIMER_PRESETS = [10, 20, 30, 40, 50, 60];
 const TIMER_MIN = 1;
 const TIMER_MAX = 180;
 
-function Timer() {
+function Timer({
+  blinking,
+  onDone,
+}: {
+  blinking: boolean;
+  onDone: () => void;
+}) {
   const [inputMin, setInputMin] = useState(10);
   const [remainingSec, setRemainingSec] = useState(10 * 60);
   const [running, setRunning] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
 
   useEffect(() => {
     if (!running) return;
@@ -287,6 +482,9 @@ function Timer() {
       setRemainingSec((s) => {
         if (s <= 1) {
           setRunning(false);
+          // Defer the parent-state update to the next tick so we don't
+          // setState inside another component's updater during React render.
+          setTimeout(() => onDoneRef.current(), 0);
           return 0;
         }
         return s - 1;
@@ -320,6 +518,7 @@ function Timer() {
         className={[
           "text-6xl font-bold tabular-nums tracking-tight text-center",
           done ? "text-red-500" : "text-gray-900",
+          done && blinking ? "animate-pulse" : "",
         ].join(" ")}
       >
         {mm}:{ss}

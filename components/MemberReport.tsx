@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import type { AuctionState, MemberBid } from "@/lib/types";
+import { formatKoreanAmount } from "@/lib/koreanAmount";
 
 interface Props {
   myNickname: string;
@@ -38,30 +39,38 @@ export default function MemberReport({
   const [err, setErr] = useState<string | null>(null);
 
   const rows = useMemo<ReportRow[]>(() => {
-    // Only resolved bids make sense in a post-auction report
+    // `won` is derived from the authoritative auctionState (which says who
+    // actually won each value) rather than from `bid.status`. localStorage-
+    // sourced bids stay as "bidding" because per-bid status transitions
+    // happen on the server; matching by winner_nickname keeps the report
+    // correct regardless of bid.status.
     return myBids
-      .filter((b) => b.status !== "bidding")
       .map((b) => {
         const v = auctionState.values.find((x) => x.id === b.value_id);
         const award = auctionState.awarded[b.value_id];
         const name = v?.name ?? "항목";
+        const won =
+          !!award &&
+          !!myNickname &&
+          award.winner_nickname.trim() === myNickname.trim();
         return {
           name,
           myAmount: b.amount,
           maxAmount: award?.amount ?? b.amount,
-          won: b.status === "won",
+          won,
         };
       })
       .sort((a, b) => {
         if (a.won !== b.won) return a.won ? -1 : 1;
         return b.myAmount - a.myAmount;
       });
-  }, [myBids, auctionState]);
+  }, [myBids, auctionState, myNickname]);
 
   const totalSpent = rows
     .filter((r) => r.won)
     .reduce((sum, r) => sum + r.myAmount, 0);
   const wonItems = rows.filter((r) => r.won);
+  const lostItems = rows.filter((r) => !r.won);
 
   const mostPreciousName = useMemo(() => {
     if (myBids.length === 0) return "";
@@ -117,32 +126,37 @@ export default function MemberReport({
           </p>
         ) : (
           <div className="mt-4">
-            <div className="flex items-center gap-2 px-2 pb-1.5 text-[10px] font-semibold text-gray-400 uppercase">
+            <div className="flex items-center gap-1.5 px-2 pb-1.5 text-[10px] font-semibold text-gray-400 uppercase">
               <span className="flex-1">가치관</span>
-              <span className="w-20 text-right">내 입찰가</span>
-              <span className="w-20 text-right">최고가</span>
-              <span className="w-8 text-right">결과</span>
+              <span className="w-16 text-right">내 입찰가</span>
+              <span className="w-16 text-right">최고입찰가</span>
+              <span className="w-14 text-right">결과</span>
             </div>
             <ul className="space-y-1">
               {rows.map((r, i) => (
                 <li
                   key={i}
                   className={[
-                    "flex items-center gap-2 px-2 py-2 rounded-lg text-sm",
+                    "flex items-center gap-1.5 px-2 py-2 rounded-lg text-sm",
                     r.won ? "bg-emerald-50" : "bg-gray-50",
                   ].join(" ")}
                 >
                   <span className="flex-1 min-w-0 font-medium truncate">
                     {r.name}
                   </span>
-                  <span className="w-20 tabular-nums text-xs text-gray-700 text-right">
+                  <span className="w-16 tabular-nums text-xs text-gray-700 text-right">
                     ₩{formatWon(r.myAmount)}
                   </span>
-                  <span className="w-20 tabular-nums text-xs text-gray-500 text-right">
+                  <span className="w-16 tabular-nums text-xs text-gray-500 text-right">
                     ₩{formatWon(r.maxAmount)}
                   </span>
-                  <span className="w-8 text-right text-base">
-                    {r.won ? "✅" : "❌"}
+                  <span
+                    className={[
+                      "w-14 text-right text-[11px] font-semibold whitespace-nowrap",
+                      r.won ? "text-emerald-600" : "text-gray-500",
+                    ].join(" ")}
+                  >
+                    {r.won ? "🏆 낙찰" : "😢 유찰"}
                   </span>
                 </li>
               ))}
@@ -150,30 +164,62 @@ export default function MemberReport({
           </div>
         )}
 
-        <footer className="mt-5 pt-4 border-t border-gray-100 space-y-2 text-sm">
-          <p className="flex items-baseline gap-2">
-            <span>💰 총 사용 금액:</span>
-            <b className="tabular-nums text-brand-700">
-              ₩{formatWon(totalSpent)}
-            </b>
-          </p>
-          <p className="flex items-baseline gap-2">
-            <span>🏆 낙찰 항목:</span>
-            <span className="flex-1 min-w-0 font-medium">
-              {wonItems.length === 0
-                ? "없어요"
-                : `${wonItems.map((w) => w.name).join(", ")} (${wonItems.length}개)`}
-            </span>
-          </p>
+        <footer className="mt-5 pt-4 border-t border-gray-100 space-y-4 text-sm">
+          {wonItems.length > 0 && (
+            <div>
+              <p className="font-semibold text-emerald-700 mb-1.5">
+                🏆 낙찰한 가치관
+              </p>
+              <ul className="space-y-1 pl-1">
+                {wonItems.map((r, i) => (
+                  <li key={i} className="text-gray-800">
+                    • {r.name}{" "}
+                    <span className="text-gray-500">
+                      ({formatKoreanAmount(r.myAmount)})
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {lostItems.length > 0 && (
+            <div>
+              <p className="font-semibold text-gray-600 mb-1.5">
+                😢 아쉽게 유찰된 가치관
+              </p>
+              <ul className="space-y-1 pl-1">
+                {lostItems.map((r, i) => (
+                  <li key={i} className="text-gray-700">
+                    • {r.name}{" "}
+                    <span className="text-gray-500">
+                      ({formatKoreanAmount(r.myAmount)} 입찰 →{" "}
+                      {formatKoreanAmount(r.maxAmount)}에 낙찰)
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {mostPreciousName && (
-            <p className="flex items-baseline gap-2">
+            <p className="flex items-baseline gap-2 flex-wrap">
               <span>💡 가장 소중한 가치:</span>
-              <span className="font-medium">{mostPreciousName}</span>
-              <span className="text-[10px] text-gray-400 shrink-0">
+              <span className="font-semibold text-brand-700">
+                {mostPreciousName}
+              </span>
+              <span className="text-[10px] text-gray-400">
                 (가장 많이 입찰한 항목)
               </span>
             </p>
           )}
+
+          <p className="flex items-baseline gap-2">
+            <span>💰 총 사용 금액:</span>
+            <b className="text-brand-700">
+              {formatKoreanAmount(totalSpent)}
+            </b>
+          </p>
         </footer>
       </div>
 

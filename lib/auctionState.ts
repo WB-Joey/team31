@@ -81,20 +81,76 @@ export const VALUE_POOL: AuctionValue[] = [
   mk("trust", "신뢰", CATEGORY_COMMUNITY),
 ];
 
-// Recommended starter selection — a balanced 15-item spread across all five
-// categories. Leader can tweak before committing.
-export function recommendedDefaultSelection(): AuctionValue[] {
-  const pick = (category: string, names: string[]) =>
-    VALUE_POOL.filter(
-      (v) => v.category === category && names.includes(v.name),
-    );
-  return [
-    ...pick(CATEGORY_ROMANCE, ["설렘", "신뢰", "영원한 사랑"]),
-    ...pick(CATEGORY_LIFE, ["성공", "돈(부)", "건강"]),
-    ...pick(CATEGORY_GROWTH, ["성장", "자존감", "성실함"]),
-    ...pick(CATEGORY_FAITH, ["믿음", "사명", "섬김"]),
-    ...pick(CATEGORY_COMMUNITY, ["가족", "친구", "사랑"]),
-  ].map((v) => ({ ...v }));
+// Recommended starter selection — randomized per click. Picks `target`
+// items spread across all five categories in rough proportion to the
+// category weights, so the result is balanced at any scale (from ~8 items
+// for a small team up to ~26 for a large one) while still giving the
+// leader a fresh combination every time they tap 추천 채우기.
+export function recommendedDefaultSelection(target: number): AuctionValue[] {
+  const shuffle = <T>(arr: T[]): T[] => {
+    const a = [...arr];
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  };
+
+  // Weights derived from the original 14~16 item quota midpoints
+  // (연애 2.5 / 삶 3.5 / 성장 3.5 / 신앙 2.5 / 공동체 2.5, sum 14.5) so the
+  // category mix stays recognizable as `target` grows or shrinks.
+  const categories = [
+    CATEGORY_ROMANCE,
+    CATEGORY_LIFE,
+    CATEGORY_GROWTH,
+    CATEGORY_FAITH,
+    CATEGORY_COMMUNITY,
+  ];
+  const weights = [2.5, 3.5, 3.5, 2.5, 2.5];
+  const totalWeight = weights.reduce((a, b) => a + b, 0);
+  const poolSizes = categories.map(
+    (c) => VALUE_POOL.filter((v) => v.category === c).length,
+  );
+
+  const clampedTarget = Math.max(
+    categories.length, // at least 1 per category
+    Math.min(VALUE_POOL.length, Math.round(target)),
+  );
+
+  // Initial proportional allocation, floored and at least 1.
+  const counts = weights.map((w) =>
+    Math.max(1, Math.floor((clampedTarget * w) / totalWeight)),
+  );
+
+  // Balance to exact target: add to categories with room, remove from the
+  // heaviest ones, choosing randomly to keep every click varied.
+  let sum = counts.reduce((a, b) => a + b, 0);
+  while (sum < clampedTarget) {
+    const eligible = counts
+      .map((c, i) => ({ i, room: poolSizes[i] - c }))
+      .filter((x) => x.room > 0);
+    if (eligible.length === 0) break;
+    const pick = eligible[Math.floor(Math.random() * eligible.length)];
+    counts[pick.i] += 1;
+    sum += 1;
+  }
+  while (sum > clampedTarget) {
+    const eligible = counts
+      .map((c, i) => ({ i, c }))
+      .filter((x) => x.c > 1);
+    if (eligible.length === 0) break;
+    const pick = eligible[Math.floor(Math.random() * eligible.length)];
+    counts[pick.i] -= 1;
+    sum -= 1;
+  }
+
+  const result: AuctionValue[] = [];
+  for (let i = 0; i < categories.length; i++) {
+    const pool = VALUE_POOL.filter((v) => v.category === categories[i]);
+    const picked = shuffle(pool).slice(0, counts[i]);
+    for (const v of picked) result.push({ ...v });
+  }
+  return result;
 }
 
 export function defaultAuctionState(): AuctionState {

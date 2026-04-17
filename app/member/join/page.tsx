@@ -70,6 +70,12 @@ export default function MemberJoinPage() {
 
     try {
       window.localStorage.setItem(NICKNAME_KEY, trimmedNickname);
+      // Room-scoped nickname: multiple browser tabs testing different players
+      // in the same room must not stomp each other via the global key.
+      window.localStorage.setItem(
+        `member_nickname_${roomCode}`,
+        trimmedNickname,
+      );
       window.localStorage.setItem(
         `participant_id_${roomCode}`,
         participant.id,

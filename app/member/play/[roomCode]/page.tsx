@@ -123,6 +123,7 @@ export default function MemberPlayPage({
           state={auctionState}
           myParticipantId={myParticipantId}
           myBids={myBids}
+          participants={participants}
         />
       </section>
 

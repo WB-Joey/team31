@@ -11,6 +11,7 @@ import {
   MEMBER_TOTAL_BUDGET,
   remainingBudgetFromBids,
 } from "@/lib/budget";
+import { formatKoreanAmount } from "@/lib/koreanAmount";
 import { getSupabaseClient } from "@/lib/supabase";
 import type {
   AuctionState,
@@ -18,6 +19,7 @@ import type {
   AwardedEntry,
   MemberBid,
 } from "@/lib/types";
+import type { Participant } from "@/lib/useParticipants";
 
 export { MEMBER_TOTAL_BUDGET };
 const STEP = 1_000_000; // 100만원 단위
@@ -26,11 +28,26 @@ function formatWon(n: number): string {
   return n.toLocaleString("ko-KR");
 }
 
+// Mirror the confirmed-bid list to localStorage so the member result screen
+// can rebuild each player's report from their own device even when DB
+// per-participant state is noisy or the lookup by nickname collides.
+function persistBidsToLocalStorage(roomCode: string, bids: MemberBid[]) {
+  try {
+    window.localStorage.setItem(
+      `bids_${roomCode}`,
+      JSON.stringify(bids),
+    );
+  } catch {
+    // Non-fatal — report will fall back to DB participant bids.
+  }
+}
+
 interface Props {
   roomCode: string;
   state: AuctionState;
   myParticipantId: string | null;
   myBids: MemberBid[];
+  participants: Participant[];
 }
 
 interface RevealedItem {
@@ -49,6 +66,7 @@ export default function MemberAuctionBoard({
   state,
   myParticipantId,
   myBids,
+  participants,
 }: Props) {
   // Draft amounts live locally per value until the member hits [입찰 확정].
   const draftKey = `member_bid_draft_${roomCode}`;
@@ -133,6 +151,24 @@ export default function MemberAuctionBoard({
     [myBids, currentValue],
   );
 
+  const topBidder = useMemo<{
+    nickname: string;
+    amount: number;
+  } | null>(() => {
+    if (!currentValue) return null;
+    let best: { nickname: string; amount: number } | null = null;
+    for (const p of participants) {
+      if (p.is_leader) continue;
+      const bid = p.bids.find(
+        (b) => b.value_id === currentValue.id && b.status === "bidding",
+      );
+      if (bid && (!best || bid.amount > best.amount)) {
+        best = { nickname: p.nickname, amount: bid.amount };
+      }
+    }
+    return best;
+  }, [currentValue, participants]);
+
   // Transient banner when a locked bid resolves (won / lost). Compares the
   // latest bids snapshot against the previous one; any 'bidding' → 'won' or
   // 'bidding' → 'lost' fires the banner with a refund-style count-up.
@@ -209,6 +245,7 @@ export default function MemberAuctionBoard({
       .eq("id", myParticipantId);
     setSaving(false);
     if (error) setErrorMsg(error.message);
+    else persistBidsToLocalStorage(roomCode, nextBids);
   }
 
   async function handleCancelBid() {
@@ -226,6 +263,7 @@ export default function MemberAuctionBoard({
       .eq("id", myParticipantId);
     setSaving(false);
     if (error) setErrorMsg(error.message);
+    else persistBidsToLocalStorage(roomCode, nextBids);
   }
 
   // --- Terminal states -----------------------------------------------------
@@ -313,6 +351,7 @@ export default function MemberAuctionBoard({
           remaining={remaining}
           saving={saving}
           disabled={!myParticipantId}
+          topBidder={topBidder}
         />
       ) : (
         <div className="rounded-2xl bg-white border border-gray-200 p-5 text-center">
@@ -352,7 +391,12 @@ export default function MemberAuctionBoard({
                     <span className="font-medium truncate">{value.name}</span>
                     {myRow?.status === "won" && (
                       <span className="text-[10px] font-bold text-emerald-600 shrink-0">
-                        🎉 내 낙찰
+                        🏆 내 낙찰
+                      </span>
+                    )}
+                    {myRow?.status === "lost" && (
+                      <span className="text-[10px] font-bold text-gray-500 shrink-0">
+                        😢 유찰
                       </span>
                     )}
                   </span>
@@ -431,6 +475,7 @@ function CurrentCard({
   remaining,
   saving,
   disabled,
+  topBidder,
 }: {
   value: AuctionValue;
   currentBid: MemberBid | null;
@@ -442,12 +487,41 @@ function CurrentCard({
   remaining: number;
   saving: boolean;
   disabled: boolean;
+  topBidder: { nickname: string; amount: number } | null;
 }) {
   const locked = currentBid?.status === "bidding";
+
+  const [raiseMode, setRaiseMode] = useState<{ prevAmount: number } | null>(
+    null,
+  );
+
+  useEffect(() => {
+    if (locked) setRaiseMode(null);
+  }, [locked]);
+
+  const minAmount = raiseMode
+    ? Math.max(raiseMode.prevAmount, topBidder?.amount ?? 0) + step
+    : 0;
   const displayAmount = locked ? currentBid!.amount : draftAmount;
-  // When locked, draft == committed so there's no projected deduction. When
-  // drafting, bumping draft to the cap makes + a no-op — gray + red it out.
   const canIncrement = !locked && draftAmount + step <= remaining;
+  const canDecrement =
+    !locked && draftAmount - step >= minAmount && draftAmount - step >= 0;
+
+  function handleRaise() {
+    if (!currentBid) return;
+    const prev = currentBid.amount;
+    const highestBid = topBidder?.amount ?? 0;
+    const startFrom = Math.max(prev, highestBid) + step;
+    onCancel();
+    onDraft(startFrom);
+    setRaiseMode({ prevAmount: prev });
+  }
+
+  function handleForfeit() {
+    onCancel();
+    onDraft(0);
+    setRaiseMode(null);
+  }
 
   return (
     <div
@@ -466,15 +540,32 @@ function CurrentCard({
         </div>
       </div>
 
-      <div className="mt-5 rounded-xl bg-white/15 p-4">
+      {(raiseMode || locked) && topBidder && (
+        <div className="mt-4 rounded-xl bg-white/20 px-3 py-2.5 text-center">
+          <p className="text-xs font-semibold">
+            🏆 현재 최고 입찰가: {formatKoreanAmount(topBidder.amount)} ({topBidder.nickname}님)
+          </p>
+          {raiseMode && (
+            <p className="text-[11px] opacity-80 mt-0.5">
+              현재 최고 입찰가는 {formatKoreanAmount(topBidder.amount)}이에요. 이보다 높게 입찰해야 낙찰받을 수 있어요!
+            </p>
+          )}
+        </div>
+      )}
+
+      <div className={["rounded-xl bg-white/15 p-4", raiseMode || locked ? "mt-3" : "mt-5"].join(" ")}>
         <p className="text-xs opacity-90 mb-3 text-center">
-          {locked ? "입찰 확정 금액" : "내 입찰가"}
+          {locked
+            ? "입찰 확정 금액"
+            : raiseMode
+              ? `이전 입찰가: ${formatKoreanAmount(raiseMode.prevAmount)} → 새 금액 설정`
+              : "내 입찰가"}
         </p>
         <div className="flex items-center gap-5">
           <button
             type="button"
             onClick={() => onDraft(displayAmount - step)}
-            disabled={locked || saving}
+            disabled={locked || saving || !canDecrement}
             className="shrink-0 w-14 h-14 rounded-full bg-white text-brand-700 hover:bg-brand-50 active:bg-brand-100 text-3xl font-black shadow-md flex items-center justify-center select-none disabled:opacity-40 disabled:cursor-not-allowed"
             aria-label="감소"
           >
@@ -508,21 +599,29 @@ function CurrentCard({
 
       {locked ? (
         <div className="mt-3 space-y-2">
-          <div className="rounded-xl bg-white/20 py-3 text-center">
+          <div className="rounded-xl bg-white/20 py-3 px-3 text-center">
             <p className="text-sm font-semibold">
-              입찰 중... <span className="animate-pulse">⏳</span>
+              ⏳ 입찰 중...
             </p>
             <p className="text-[11px] opacity-80 mt-0.5">
-              리더의 낙찰 확정을 기다리고 있어요
+              더 올리려면 [금액 올리기]를 눌러주세요
             </p>
           </div>
           <button
             type="button"
-            onClick={onCancel}
+            onClick={handleRaise}
             disabled={saving}
-            className="w-full rounded-xl bg-white/10 hover:bg-white/20 text-white/90 border border-white/30 font-medium py-3 text-sm disabled:opacity-50"
+            className="w-full rounded-xl bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 text-white font-bold py-3.5 text-base shadow-sm disabled:opacity-50"
           >
-            입찰 포기
+            📈 금액 올리기
+          </button>
+          <button
+            type="button"
+            onClick={handleForfeit}
+            disabled={saving}
+            className="w-full rounded-xl bg-white/10 hover:bg-white/20 text-white/70 border border-white/20 font-medium py-2.5 text-xs disabled:opacity-50"
+          >
+            🚫 입찰 포기
           </button>
         </div>
       ) : (

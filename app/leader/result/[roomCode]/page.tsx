@@ -13,6 +13,7 @@ import {
   type Content,
 } from "@/lib/types";
 import { useAuctionState } from "@/lib/useAuctionState";
+import { useEncouragements } from "@/lib/useEncouragements";
 import { useParticipants } from "@/lib/useParticipants";
 import { useReactions } from "@/lib/useReactions";
 import { useResult } from "@/lib/useResult";
@@ -65,6 +66,7 @@ export default function LeaderResultPage({
 
   const participants = useParticipants(sessionId);
   const reactions = useReactions(sessionId);
+  const encouragements = useEncouragements(sessionId);
   const { result, loaded: resultLoaded } = useResult(sessionId);
   const { state: auctionState, loaded: auctionLoaded } =
     useAuctionState(sessionId);
@@ -188,9 +190,7 @@ export default function LeaderResultPage({
       .from("sessions")
       .update({
         status: "result",
-        sharing_order: null,
-        sharing_index: 0,
-        sharing_ladder: null,
+        sharing_state: { order: null, index: 0, ladder: null, method: null },
       })
       .eq("id", sessionId);
 
@@ -241,6 +241,8 @@ export default function LeaderResultPage({
             auctionState={auctionState}
             myParticipantId={null}
             isLeader
+            reactions={reactions}
+            encouragements={encouragements}
           />
         </div>
 
@@ -251,7 +253,7 @@ export default function LeaderResultPage({
           <LeaderFeedbackCard
             participants={participants}
             reactions={reactions}
-            auctionState={auctionState}
+            encouragements={encouragements}
           />
         </section>
       </main>
