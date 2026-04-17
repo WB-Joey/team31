@@ -147,25 +147,27 @@ export default function AuctionSelectionPanel({
       </div>
 
       {/* Category tabs */}
-      <div className="flex gap-1 bg-gray-100 rounded-xl p-1 overflow-x-auto">
-        {TABS.map((t) => {
-          const active = t === tab;
-          return (
-            <button
-              key={t}
-              type="button"
-              onClick={() => setTab(t)}
-              className={[
-                "flex-1 min-w-max whitespace-nowrap py-2 px-3 rounded-lg text-xs font-medium transition",
-                active
-                  ? "bg-white text-gray-900 shadow-sm"
-                  : "text-gray-500 hover:text-gray-700",
-              ].join(" ")}
-            >
-              {CATEGORY_EMOJI[t]} {shortLabel(t)}
-            </button>
-          );
-        })}
+      <div className="-mx-1 px-1 overflow-x-auto scrollbar-hide">
+        <div className="flex gap-1 bg-gray-100 rounded-xl p-1 min-w-min">
+          {TABS.map((t) => {
+            const active = t === tab;
+            return (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTab(t)}
+                className={[
+                  "whitespace-nowrap py-2 px-2.5 rounded-lg text-xs font-medium transition shrink-0",
+                  active
+                    ? "bg-white text-gray-900 shadow-sm"
+                    : "text-gray-500 hover:text-gray-700",
+                ].join(" ")}
+              >
+                {CATEGORY_EMOJI[t]} {shortLabel(t)}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Checkbox list for current tab */}
@@ -256,28 +258,28 @@ export default function AuctionSelectionPanel({
                   }}
                   onDragEnd={() => setDragIndex(null)}
                   className={[
-                    "flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm transition",
+                    "flex items-center gap-1 rounded-lg px-1.5 py-1.5 text-sm transition",
                     "bg-gray-50",
                     isBeingDragged ? "opacity-40" : "",
                   ].join(" ")}
                 >
                   <span
-                    className="text-gray-400 cursor-grab select-none"
+                    className="text-gray-400 cursor-grab select-none shrink-0"
                     aria-hidden
                   >
                     ⋮⋮
                   </span>
-                  <span className="w-6 text-center text-xs text-gray-500 tabular-nums">
+                  <span className="w-5 text-center text-xs text-gray-500 tabular-nums shrink-0">
                     {i + 1}
                   </span>
                   <span className="shrink-0">{v.category_emoji}</span>
-                  <span className="flex-1 truncate">{v.name}</span>
+                  <span className="flex-1 min-w-0 truncate">{v.name}</span>
                   <button
                     type="button"
                     onClick={() => moveUp(i)}
                     disabled={i === 0}
                     aria-label="위로"
-                    className="w-7 h-7 rounded text-gray-400 hover:bg-gray-200 disabled:opacity-30"
+                    className="w-6 h-6 rounded text-gray-400 hover:bg-gray-200 disabled:opacity-30 shrink-0 text-xs"
                   >
                     ↑
                   </button>
@@ -286,7 +288,7 @@ export default function AuctionSelectionPanel({
                     onClick={() => moveDown(i)}
                     disabled={i === selected.length - 1}
                     aria-label="아래로"
-                    className="w-7 h-7 rounded text-gray-400 hover:bg-gray-200 disabled:opacity-30"
+                    className="w-6 h-6 rounded text-gray-400 hover:bg-gray-200 disabled:opacity-30 shrink-0 text-xs"
                   >
                     ↓
                   </button>
@@ -294,7 +296,7 @@ export default function AuctionSelectionPanel({
                     type="button"
                     onClick={() => removeAt(v.id)}
                     aria-label="제거"
-                    className="w-7 h-7 rounded text-gray-400 hover:text-red-500 hover:bg-red-50"
+                    className="w-6 h-6 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 shrink-0 text-xs"
                   >
                     ✕
                   </button>

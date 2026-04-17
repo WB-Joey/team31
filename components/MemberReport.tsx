@@ -126,33 +126,33 @@ export default function MemberReport({
           </p>
         ) : (
           <div className="mt-4">
-            <div className="flex items-center gap-1.5 px-2 pb-1.5 text-[10px] font-semibold text-gray-400 uppercase">
-              <span className="flex-1">가치관</span>
-              <span className="w-16 text-right">내 입찰가</span>
-              <span className="w-16 text-right">최고입찰가</span>
-              <span className="w-14 text-right">결과</span>
+            <div className="flex items-center gap-1 px-1.5 pb-1.5 text-[10px] font-semibold text-gray-400 uppercase">
+              <span className="flex-1 min-w-0">가치관</span>
+              <span className="w-14 text-right shrink-0">내 입찰</span>
+              <span className="w-14 text-right shrink-0">최고가</span>
+              <span className="w-12 text-right shrink-0">결과</span>
             </div>
             <ul className="space-y-1">
               {rows.map((r, i) => (
                 <li
                   key={i}
                   className={[
-                    "flex items-center gap-1.5 px-2 py-2 rounded-lg text-sm",
+                    "flex items-center gap-1 px-1.5 py-2 rounded-lg text-sm",
                     r.won ? "bg-emerald-50" : "bg-gray-50",
                   ].join(" ")}
                 >
-                  <span className="flex-1 min-w-0 font-medium truncate">
+                  <span className="flex-1 min-w-0 font-medium truncate text-xs">
                     {r.name}
                   </span>
-                  <span className="w-16 tabular-nums text-xs text-gray-700 text-right">
+                  <span className="w-14 tabular-nums text-[11px] text-gray-700 text-right shrink-0">
                     ₩{formatWon(r.myAmount)}
                   </span>
-                  <span className="w-16 tabular-nums text-xs text-gray-500 text-right">
+                  <span className="w-14 tabular-nums text-[11px] text-gray-500 text-right shrink-0">
                     ₩{formatWon(r.maxAmount)}
                   </span>
                   <span
                     className={[
-                      "w-14 text-right text-[11px] font-semibold whitespace-nowrap",
+                      "w-12 text-right text-[10px] font-semibold whitespace-nowrap shrink-0",
                       r.won ? "text-emerald-600" : "text-gray-500",
                     ].join(" ")}
                   >

@@ -401,8 +401,10 @@ export default function MemberAuctionBoard({
                     )}
                   </span>
                   {award ? (
-                    <span className="text-gray-600 tabular-nums shrink-0">
-                      {award.winner_nickname} · ₩{formatWon(award.amount)}
+                    <span className="text-gray-600 tabular-nums shrink-0 text-xs text-right">
+                      {award.winner_nickname}
+                      <br className="sm:hidden" />
+                      <span className="sm:before:content-['_·_']"> ₩{formatWon(award.amount)}</span>
                     </span>
                   ) : (
                     <span className="text-xs text-gray-400 shrink-0">유찰</span>
@@ -561,19 +563,19 @@ function CurrentCard({
               ? `이전 입찰가: ${formatKoreanAmount(raiseMode.prevAmount)} → 새 금액 설정`
               : "내 입찰가"}
         </p>
-        <div className="flex items-center gap-5">
+        <div className="flex items-center gap-3">
           <button
             type="button"
             onClick={() => onDraft(displayAmount - step)}
             disabled={locked || saving || !canDecrement}
-            className="shrink-0 w-14 h-14 rounded-full bg-white text-brand-700 hover:bg-brand-50 active:bg-brand-100 text-3xl font-black shadow-md flex items-center justify-center select-none disabled:opacity-40 disabled:cursor-not-allowed"
+            className="shrink-0 w-12 h-12 rounded-full bg-white text-brand-700 hover:bg-brand-50 active:bg-brand-100 text-2xl font-black shadow-md flex items-center justify-center select-none disabled:opacity-40 disabled:cursor-not-allowed"
             aria-label="감소"
           >
             −
           </button>
-          <div className="flex-1 text-center tabular-nums">
-            <span className="text-base opacity-90 mr-1">₩</span>
-            <span className="text-3xl font-extrabold">
+          <div className="flex-1 min-w-0 text-center tabular-nums">
+            <span className="text-sm opacity-90 mr-0.5">₩</span>
+            <span className="text-2xl font-extrabold">
               {formatWon(displayAmount)}
             </span>
           </div>
@@ -582,7 +584,7 @@ function CurrentCard({
             onClick={() => onDraft(displayAmount + step)}
             disabled={locked || saving || !canIncrement}
             className={[
-              "shrink-0 w-14 h-14 rounded-full text-3xl font-black shadow-md flex items-center justify-center select-none disabled:cursor-not-allowed",
+              "shrink-0 w-12 h-12 rounded-full text-2xl font-black shadow-md flex items-center justify-center select-none disabled:cursor-not-allowed",
               !locked && !canIncrement
                 ? "bg-red-500 text-white opacity-80"
                 : "bg-white text-brand-700 hover:bg-brand-50 active:bg-brand-100 disabled:opacity-40",
@@ -672,11 +674,11 @@ function BudgetBar({
         critical ? "animate-shake" : "",
       ].join(" ")}
     >
-      <div className="flex items-center justify-between text-sm mb-1.5">
-        <span className="text-gray-500">남은 예산</span>
+      <div className="flex items-center justify-between text-sm mb-1.5 gap-2">
+        <span className="text-gray-500 shrink-0">남은 예산</span>
         <span
           className={[
-            "tabular-nums",
+            "tabular-nums text-right min-w-0",
             overBudget ? "text-red-500" : textColor,
           ].join(" ")}
         >

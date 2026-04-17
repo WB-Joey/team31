@@ -97,7 +97,7 @@ export default function MemberPlayPage({
   }
 
   return (
-    <main className="min-h-screen px-5 pt-6 pb-12 max-w-xl mx-auto">
+    <main className="min-h-screen px-5 pt-6 pb-12 max-w-xl mx-auto overflow-x-hidden">
       <div className="flex items-center justify-between">
         <Link
           href="/"

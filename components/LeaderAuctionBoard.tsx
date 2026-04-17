@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import AuctionSelectionPanel from "./AuctionSelectionPanel";
 import SlotMachine from "./SlotMachine";
 import {
+  CATEGORY_EMOJI,
+  VALUE_CATEGORIES,
   auctionHasCommitted,
   auctionHasStarted,
   nextUnrevealedValue,
@@ -110,6 +112,15 @@ export default function LeaderAuctionBoard({
   const upcoming = useMemo(() => nextUnrevealedValue(state), [state]);
   const unrevealedPool = useMemo(() => unrevealedValues(state), [state]);
 
+  const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
+  const filteredPool = useMemo(
+    () =>
+      categoryFilter
+        ? unrevealedPool.filter((v) => v.category === categoryFilter)
+        : unrevealedPool,
+    [unrevealedPool, categoryFilter],
+  );
+
   const awardedList = useMemo(() => {
     return state.values
       .map((v) => {
@@ -197,9 +208,9 @@ export default function LeaderAuctionBoard({
   }
 
   async function handleRandomPick() {
-    if (unrevealedPool.length === 0) return;
+    if (filteredPool.length === 0) return;
     const winner =
-      unrevealedPool[Math.floor(Math.random() * unrevealedPool.length)];
+      filteredPool[Math.floor(Math.random() * filteredPool.length)];
     await saveState({
       ...state,
       current_id: winner.id,
@@ -298,11 +309,6 @@ export default function LeaderAuctionBoard({
     await saveState(next);
   }
 
-  async function handleEnd() {
-    if (!confirm("경매를 종료할까요? 더 이상 공개할 수 없어요.")) return;
-    await saveState({ ...state, ended: true, current_id: null });
-  }
-
   // --- Ended ---------------------------------------------------------------
 
   if (state.ended) {
@@ -310,9 +316,6 @@ export default function LeaderAuctionBoard({
       <div className="rounded-2xl bg-white border border-gray-200 p-5 text-center">
         <div className="text-4xl mb-2">🏁</div>
         <p className="font-semibold">경매가 종료되었어요</p>
-        <p className="mt-1 text-sm text-gray-500">
-          아래 &quot;결과 입력하기&quot; 버튼으로 넘어가주세요
-        </p>
         <div className="mt-4 text-sm text-gray-600">
           낙찰 {awardedList.length}건 · 공개 {state.revealed_ids.length}건
         </div>
@@ -376,8 +379,11 @@ export default function LeaderAuctionBoard({
           value={upcoming}
           onReveal={handleRevealNext}
           onRandomPick={handleRandomPick}
-          canRandomPick={unrevealedPool.length > 0}
+          canRandomPick={filteredPool.length > 0}
           saving={saving}
+          categoryFilter={categoryFilter}
+          onCategoryFilter={setCategoryFilter}
+          unrevealedPool={unrevealedPool}
         />
       ) : (
         <div className="rounded-2xl bg-gradient-to-br from-brand-500 to-brand-600 text-white p-5 text-center">
@@ -443,17 +449,6 @@ export default function LeaderAuctionBoard({
         </div>
       )}
 
-      {started && !state.ended && (
-        <button
-          type="button"
-          onClick={handleEnd}
-          disabled={saving}
-          className="w-full rounded-xl border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 font-medium py-3 text-sm disabled:opacity-60"
-        >
-          경매 종료 🏁
-        </button>
-      )}
-
       {nicknameModalOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-6"
@@ -485,19 +480,41 @@ export default function LeaderAuctionBoard({
 
 // ---- Subcomponents -------------------------------------------------------
 
+function categoryShortLabel(cat: string): string {
+  switch (cat) {
+    case "연애 · 결혼": return "연애";
+    case "현실 · 성공 · 삶": return "현실";
+    case "개인 성장 · 내면": return "성장";
+    case "신앙 · 소명": return "신앙";
+    case "가족 · 공동체": return "가족";
+    default: return cat;
+  }
+}
+
 function UpcomingCard({
   value,
   onReveal,
   onRandomPick,
   canRandomPick,
   saving,
+  categoryFilter,
+  onCategoryFilter,
+  unrevealedPool,
 }: {
   value: AuctionValue;
   onReveal: () => void;
   onRandomPick: () => void;
   canRandomPick: boolean;
   saving: boolean;
+  categoryFilter: string | null;
+  onCategoryFilter: (cat: string | null) => void;
+  unrevealedPool: AuctionValue[];
 }) {
+  const filterLabel = categoryFilter
+    ? `${CATEGORY_EMOJI[categoryFilter]} ${categoryShortLabel(categoryFilter)}`
+    : null;
+  const emptyCategory = categoryFilter && !canRandomPick;
+
   return (
     <div className="rounded-2xl text-white p-5 shadow-sm bg-gradient-to-br from-brand-500 to-brand-600">
       <p className="text-xs opacity-80">다음 항목</p>
@@ -508,7 +525,57 @@ function UpcomingCard({
           <p className="text-2xl font-bold">{value.name}</p>
         </div>
       </div>
-      <div className="mt-4 grid grid-cols-2 gap-2">
+
+      <div className="mt-4 -mx-1 px-1 overflow-x-auto scrollbar-hide">
+        <div className="flex gap-1.5 min-w-min">
+          <button
+            type="button"
+            onClick={() => onCategoryFilter(null)}
+            className={[
+              "shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition",
+              categoryFilter === null
+                ? "bg-white text-brand-700 shadow-sm"
+                : "bg-white/20 hover:bg-white/30",
+            ].join(" ")}
+          >
+            🔀 전체
+          </button>
+          {VALUE_CATEGORIES.map((cat) => {
+            const count = unrevealedPool.filter((v) => v.category === cat).length;
+            const active = categoryFilter === cat;
+            return (
+              <button
+                key={cat}
+                type="button"
+                onClick={() => onCategoryFilter(cat)}
+                className={[
+                  "shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition",
+                  active
+                    ? "bg-white text-brand-700 shadow-sm"
+                    : count === 0
+                      ? "bg-white/10 opacity-50"
+                      : "bg-white/20 hover:bg-white/30",
+                ].join(" ")}
+              >
+                {CATEGORY_EMOJI[cat]} {categoryShortLabel(cat)}
+                {count > 0 && (
+                  <span className="ml-0.5 opacity-70">{count}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {emptyCategory && (
+        <div className="mt-3 rounded-lg bg-white/20 px-3 py-2 text-center">
+          <p className="text-xs">
+            {filterLabel} 카테고리의 가치가 모두 공개됐어요! 다른 카테고리를 선택해주세요
+          </p>
+        </div>
+      )}
+
+      <div className="mt-3 grid grid-cols-2 gap-2">
         <button
           type="button"
           onClick={onReveal}
@@ -521,7 +588,12 @@ function UpcomingCard({
           type="button"
           onClick={onRandomPick}
           disabled={saving || !canRandomPick}
-          className="rounded-xl bg-white/20 hover:bg-white/30 font-semibold py-3 disabled:opacity-40"
+          className={[
+            "rounded-xl font-semibold py-3 disabled:opacity-40",
+            canRandomPick
+              ? "bg-white/20 hover:bg-white/30"
+              : "bg-white/10",
+          ].join(" ")}
         >
           🎰 랜덤 뽑기
         </button>
@@ -633,7 +705,7 @@ function CurrentCard({
           <p className="text-[11px] text-gray-500 font-medium mb-2 text-center">
             낙찰 금액
           </p>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={() => {
@@ -641,13 +713,13 @@ function CurrentCard({
                 const next = Math.max(0, cur - 1_000_000);
                 onAwardAmount(String(next));
               }}
-              className="shrink-0 w-14 h-14 rounded-full text-3xl font-black shadow-sm flex items-center justify-center select-none text-white bg-brand-500 hover:bg-brand-600 active:bg-brand-700"
+              className="shrink-0 w-12 h-12 rounded-full text-2xl font-black shadow-sm flex items-center justify-center select-none text-white bg-brand-500 hover:bg-brand-600 active:bg-brand-700"
               aria-label="감소"
             >
               −
             </button>
-            <div className="flex-1 relative">
-              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-base text-gray-500 font-semibold pointer-events-none">
+            <div className="flex-1 min-w-0 relative">
+              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-sm text-gray-500 font-semibold pointer-events-none">
                 ₩
               </span>
               <input
@@ -658,7 +730,7 @@ function CurrentCard({
                 value={awardAmount}
                 onChange={(e) => onAwardAmount(e.target.value)}
                 placeholder="0"
-                className="w-full rounded-lg pl-8 pr-2 py-3 text-2xl font-extrabold text-gray-900 text-center tabular-nums bg-gray-50 border border-gray-200 focus:border-brand-400 outline-none"
+                className="w-full rounded-lg pl-7 pr-1 py-3 text-xl font-extrabold text-gray-900 text-center tabular-nums bg-gray-50 border border-gray-200 focus:border-brand-400 outline-none"
               />
             </div>
             <button
@@ -667,7 +739,7 @@ function CurrentCard({
                 const cur = Number(awardAmount) || 0;
                 onAwardAmount(String(cur + 1_000_000));
               }}
-              className="shrink-0 w-14 h-14 rounded-full text-3xl font-black shadow-sm flex items-center justify-center select-none text-white bg-brand-500 hover:bg-brand-600 active:bg-brand-700"
+              className="shrink-0 w-12 h-12 rounded-full text-2xl font-black shadow-sm flex items-center justify-center select-none text-white bg-brand-500 hover:bg-brand-600 active:bg-brand-700"
               aria-label="증가"
             >
               +

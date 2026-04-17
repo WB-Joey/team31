@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import LeaderAuctionBoard from "@/components/LeaderAuctionBoard";
 import MemberBudgetPanel from "@/components/MemberBudgetPanel";
@@ -16,6 +17,7 @@ export default function LeaderPlayPage({
 }: {
   params: { roomCode: string };
 }) {
+  const router = useRouter();
   const roomCode = params.roomCode.toUpperCase();
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [content, setContent] = useState<Content | null>(null);
@@ -24,6 +26,8 @@ export default function LeaderPlayPage({
   const [tab, setTab] = useState<Tab>("auction");
   const [copied, setCopied] = useState(false);
   const [timerDone, setTimerDone] = useState(false);
+  const [endConfirmOpen, setEndConfirmOpen] = useState(false);
+  const [ending, setEnding] = useState(false);
 
   useEffect(() => {
     const supabase = getSupabaseClient();
@@ -53,7 +57,9 @@ export default function LeaderPlayPage({
       "아래 링크로 입장해주세요 😊",
       "",
       `👉 ${appUrl}`,
-      `룸코드: ${roomCode}`,
+      "",
+      "PW:",
+      roomCode,
     ].join("\n");
     try {
       await navigator.clipboard.writeText(message);
@@ -89,7 +95,7 @@ export default function LeaderPlayPage({
   }
 
   return (
-    <main className="min-h-screen px-5 pt-6 pb-12 max-w-xl mx-auto">
+    <main className="min-h-screen px-5 pt-6 pb-12 max-w-xl mx-auto overflow-x-hidden">
       <Link
         href="/"
         className="text-sm text-gray-500 hover:text-gray-700 inline-flex items-center gap-1"
@@ -186,12 +192,74 @@ export default function LeaderPlayPage({
         </div>
       </section>
 
-      <Link
-        href={`/leader/result/${roomCode}`}
-        className="mt-10 block w-full text-center rounded-2xl bg-brand-500 hover:bg-brand-600 text-white font-semibold py-4 shadow-sm"
-      >
-        결과 입력하기
-      </Link>
+      {auctionState.ended ? (
+        <Link
+          href={`/leader/result/${roomCode}`}
+          className="mt-10 block w-full text-center rounded-2xl bg-brand-500 hover:bg-brand-600 text-white font-semibold py-4 shadow-sm"
+        >
+          결과 입력하기 →
+        </Link>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setEndConfirmOpen(true)}
+          disabled={ending}
+          className="mt-10 w-full rounded-2xl bg-gray-800 hover:bg-gray-900 text-white font-semibold py-4 shadow-sm disabled:opacity-60"
+        >
+          🏁 경매 종료 &amp; 결과 입력하기
+        </button>
+      )}
+
+      {endConfirmOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-6"
+          onClick={() => setEndConfirmOpen(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="text-lg font-bold text-center">
+              경매를 종료하고 결과를 입력할까요?
+            </p>
+            <p className="mt-2 text-sm text-gray-500 text-center">
+              종료하면 더 이상 가치를 공개할 수 없어요
+            </p>
+            <div className="mt-5 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setEndConfirmOpen(false)}
+                className="rounded-xl border border-gray-300 bg-white hover:bg-gray-50 text-gray-700 font-semibold py-3 text-sm"
+              >
+                ❌ 아니요, 계속할게요
+              </button>
+              <button
+                type="button"
+                disabled={ending}
+                onClick={async () => {
+                  setEnding(true);
+                  const supabase = getSupabaseClient();
+                  await supabase
+                    .from("sessions")
+                    .update({
+                      auction_state: {
+                        ...auctionState,
+                        ended: true,
+                        current_id: null,
+                      },
+                    })
+                    .eq("id", sessionId);
+                  setEndConfirmOpen(false);
+                  router.push(`/leader/result/${roomCode}`);
+                }}
+                className="rounded-xl bg-brand-500 hover:bg-brand-600 text-white font-semibold py-3 text-sm disabled:opacity-60"
+              >
+                ✅ 네, 종료할게요
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {timerDone && (
         <TimerDonePopup onClose={() => setTimerDone(false)} />

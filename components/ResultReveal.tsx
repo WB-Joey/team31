@@ -457,9 +457,9 @@ export default function ResultReveal({
       </div>
 
       {/* Winner announcement */}
-      <section className="relative rounded-3xl bg-gradient-to-br from-amber-400 via-brand-500 to-brand-600 text-white p-7 text-center shadow-lg">
+      <section className="relative rounded-3xl bg-gradient-to-br from-amber-400 via-brand-500 to-brand-600 text-white p-5 sm:p-7 text-center shadow-lg">
         <p className="text-sm opacity-90 mb-2">🏆 오늘의 우승자</p>
-        <h1 className="text-5xl font-extrabold tracking-tight animate-pop-in drop-shadow">
+        <h1 className="text-4xl sm:text-5xl font-extrabold tracking-tight animate-pop-in drop-shadow break-keep">
           {result.winner_nickname}
         </h1>
         <p className="mt-3 text-sm opacity-90">{result.winner_reason}</p>
@@ -475,12 +475,12 @@ export default function ResultReveal({
             {stats.map((s, i) => (
               <li
                 key={s.nickname}
-                className="flex items-center justify-between px-4 py-3 text-sm"
+                className="flex items-center justify-between gap-2 px-3 py-3 text-sm"
               >
-                <span className="flex items-center gap-2">
+                <span className="flex items-center gap-2 min-w-0">
                   <span
                     className={[
-                      "inline-flex items-center justify-center min-w-[2.25rem]",
+                      "inline-flex items-center justify-center shrink-0 w-9",
                       i < 3 ? "text-2xl" : "text-xs text-gray-500",
                     ].join(" ")}
                   >
@@ -488,13 +488,14 @@ export default function ResultReveal({
                   </span>
                   <span
                     className={[
+                      "truncate",
                       i === 0 ? "font-semibold text-brand-700" : "text-gray-800",
                     ].join(" ")}
                   >
                     {s.nickname}
                   </span>
                 </span>
-                <span className="text-xs text-gray-500 tabular-nums">
+                <span className="text-xs text-gray-500 tabular-nums shrink-0">
                   {s.count}개 · ₩{s.totalAmount.toLocaleString("ko-KR")}
                 </span>
               </li>
@@ -519,14 +520,14 @@ export default function ResultReveal({
               return (
                 <li
                   key={i}
-                  className="flex items-center justify-between gap-3 px-4 py-3 text-sm"
+                  className="flex items-center justify-between gap-2 px-3 py-3 text-sm"
                 >
-                  <span className="font-medium text-gray-900">
+                  <span className="font-medium text-gray-900 truncate min-w-0">
                     {row.value_name}
                   </span>
                   <span
                     className={[
-                      "text-right",
+                      "text-right text-xs shrink-0",
                       isWinner ? "text-brand-700 font-semibold" : "text-gray-600",
                     ].join(" ")}
                   >
