@@ -251,6 +251,7 @@ export default function LeaderResultPage({
             🎯 팀 피드백 저장
           </h2>
           <LeaderFeedbackCard
+            leaderNickname={participants.find((p) => p.is_leader)?.nickname ?? "리더"}
             participants={participants}
             reactions={reactions}
             encouragements={encouragements}

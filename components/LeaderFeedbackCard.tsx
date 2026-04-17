@@ -7,6 +7,7 @@ import type { Participant } from "@/lib/useParticipants";
 import type { Reaction } from "@/lib/useReactions";
 
 interface Props {
+  leaderNickname: string;
   participants: Participant[];
   reactions: Reaction[];
   encouragements: Encouragement[];
@@ -17,10 +18,15 @@ function formatToday(): string {
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}${mm}${dd}`;
+  return `${yyyy}.${mm}.${dd}`;
+}
+
+function formatTodayFile(): string {
+  return formatToday().replace(/\./g, "");
 }
 
 export default function LeaderFeedbackCard({
+  leaderNickname,
   participants,
   reactions,
   encouragements,
@@ -40,7 +46,6 @@ export default function LeaderFeedbackCard({
     return counts;
   }, [reactions]);
 
-  // Newest-first — newly arrived messages appear at the top via realtime.
   const messagesNewestFirst = useMemo(
     () =>
       [...encouragements].sort((a, b) =>
@@ -57,20 +62,45 @@ export default function LeaderFeedbackCard({
       const h2c = (await import("html2canvas")).default;
       const canvas = await h2c(cardRef.current, {
         backgroundColor: "#ffffff",
-        scale: 2,
+        scale: 1.5,
         useCORS: true,
         logging: false,
       });
-      const dataUrl = canvas.toDataURL("image/png");
-      const a = document.createElement("a");
-      a.href = dataUrl;
-      a.download = `가치관경매_팀피드백_${formatToday()}.png`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      const fileName = `가치관경매_팀피드백_${formatTodayFile()}.jpg`;
+
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+          (b) => (b ? resolve(b) : reject(new Error("toBlob failed"))),
+          "image/jpeg",
+          0.85,
+        );
+      });
+
+      if (
+        typeof navigator !== "undefined" &&
+        navigator.share &&
+        navigator.canShare?.({ files: [new File([blob], fileName, { type: "image/jpeg" })] })
+      ) {
+        await navigator.share({
+          files: [new File([blob], fileName, { type: "image/jpeg" })],
+        });
+      } else {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      }
     } catch (e) {
-      console.error("[leader-feedback] download failed", e);
-      setErr("이미지 저장에 실패했어요. 브라우저를 새로고침하고 다시 시도해주세요.");
+      if ((e as DOMException)?.name === "AbortError") {
+        // User cancelled share sheet
+      } else {
+        console.error("[leader-feedback] download failed", e);
+        setErr("이미지 저장에 실패했어요. 브라우저를 새로고침하고 다시 시도해주세요.");
+      }
     } finally {
       setDownloading(false);
     }
@@ -80,64 +110,111 @@ export default function LeaderFeedbackCard({
     <div className="space-y-3">
       <div
         ref={cardRef}
-        className="rounded-3xl bg-white border border-gray-200 p-6 shadow-sm"
+        style={{
+          background: "#ffffff",
+          padding: "24px",
+          fontFamily: "'Pretendard Variable', Pretendard, system-ui, sans-serif",
+          wordBreak: "keep-all",
+        }}
       >
-        <header className="text-center border-b border-gray-100 pb-4">
-          <p className="text-xl font-extrabold">🎯 팀 피드백 레포트</p>
-          <p className="mt-1 text-sm text-gray-500">
-            총 <b className="text-gray-800">{memberCount}명</b> 참여
-          </p>
-        </header>
+        {/* Header */}
+        <div
+          style={{
+            background: "linear-gradient(135deg, #f97316 0%, #ea580c 100%)",
+            borderRadius: "16px",
+            padding: "24px 20px",
+            textAlign: "center",
+            color: "#ffffff",
+          }}
+        >
+          <div style={{ fontSize: "14px", opacity: 0.9, marginBottom: "4px" }}>
+            🏦 가치관 경매 레포트
+          </div>
+          <div style={{ fontSize: "24px", fontWeight: 800 }}>
+            {leaderNickname || "리더"}님의 팀 피드백
+          </div>
+          <div style={{ display: "flex", justifyContent: "center", gap: "12px", marginTop: "10px", fontSize: "12px", opacity: 0.85 }}>
+            <span>{formatToday()}</span>
+            <span>·</span>
+            <span>참여 {memberCount}명</span>
+          </div>
+        </div>
 
-        {/* 1. Emoji reaction counts */}
-        <section className="mt-4">
-          <p className="text-xs font-semibold text-gray-400 uppercase mb-2">
-            이모지 반응
-          </p>
-          <div className="grid grid-cols-4 gap-2">
+        {/* Emoji reactions */}
+        <div style={{ marginTop: "20px" }}>
+          <div style={{ fontSize: "13px", fontWeight: 700, color: "#374151", marginBottom: "10px" }}>
+            😊 이모지 반응
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: "8px" }}>
             {REACTIONS.map((r) => (
               <div
                 key={r.key}
-                className="rounded-xl bg-gray-50 px-2 py-3 text-center"
+                style={{
+                  background: "#fafafa",
+                  borderRadius: "14px",
+                  padding: "14px 8px",
+                  textAlign: "center",
+                  border: "1px solid #f3f4f6",
+                }}
               >
-                <div className="text-2xl">{r.emoji}</div>
-                <div className="mt-0.5 text-sm font-bold tabular-nums">
+                <div style={{ fontSize: "28px" }}>{r.emoji}</div>
+                <div style={{ fontSize: "18px", fontWeight: 800, color: "#1f2937", marginTop: "4px" }}>
                   {reactionCounts[r.key] ?? 0}
                 </div>
-                <div className="text-[10px] text-gray-400">{r.label}</div>
+                <div style={{ fontSize: "10px", color: "#9ca3af", marginTop: "2px" }}>
+                  {r.label}
+                </div>
               </div>
             ))}
           </div>
-        </section>
+        </div>
 
-        {/* 2. Encouragement messages */}
-        <section className="mt-5">
-          <p className="text-xs font-semibold text-gray-400 uppercase mb-2">
-            팀원들의 격려 메시지
-          </p>
+        {/* Encouragement messages */}
+        <div style={{ marginTop: "20px" }}>
+          <div style={{ fontSize: "13px", fontWeight: 700, color: "#374151", marginBottom: "10px" }}>
+            💌 팀원들의 격려 메시지
+          </div>
           {messagesNewestFirst.length === 0 ? (
-            <p className="py-6 text-center text-sm text-gray-400 bg-gray-50 rounded-xl">
+            <div
+              style={{
+                padding: "24px",
+                textAlign: "center",
+                fontSize: "13px",
+                color: "#9ca3af",
+                background: "#fafafa",
+                borderRadius: "14px",
+              }}
+            >
               아직 메시지가 없어요
-            </p>
+            </div>
           ) : (
-            <ul className="space-y-1.5">
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
               {messagesNewestFirst.map((m) => (
-                <li
+                <div
                   key={m.id}
-                  className="rounded-xl bg-amber-50 border border-amber-100 px-3 py-2.5 text-sm"
+                  style={{
+                    background: "#fffbeb",
+                    border: "1px solid #fde68a",
+                    borderRadius: "12px",
+                    padding: "12px 14px",
+                  }}
                 >
-                  <p className="leading-snug">
-                    <span className="font-semibold text-amber-800">
-                      💌 {m.participant_nickname}
-                    </span>
-                    <span className="text-gray-400">: </span>
-                    <span className="text-gray-800">“{m.message}”</span>
-                  </p>
-                </li>
+                  <div style={{ fontSize: "12px", fontWeight: 700, color: "#b45309", marginBottom: "4px" }}>
+                    💌 {m.participant_nickname}
+                  </div>
+                  <div style={{ fontSize: "14px", color: "#1f2937", lineHeight: 1.5 }}>
+                    &ldquo;{m.message}&rdquo;
+                  </div>
+                </div>
               ))}
-            </ul>
+            </div>
           )}
-        </section>
+        </div>
+
+        {/* Footer watermark */}
+        <div style={{ marginTop: "18px", textAlign: "center", fontSize: "10px", color: "#d1d5db" }}>
+          삼일교회 청년부 사근사근팀 · 가치관 경매
+        </div>
       </div>
 
       {err && (
@@ -146,7 +223,6 @@ export default function LeaderFeedbackCard({
         </p>
       )}
 
-      {/* 3. Save button */}
       <button
         type="button"
         onClick={handleDownload}
