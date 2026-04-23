@@ -171,3 +171,96 @@ export function normalizeBids(raw: unknown): MemberBid[] {
   }
   return out;
 }
+// ==============================
+// Bible Quiz state (stage 12) — 성경퀴즈대회 (도전 골든벨)
+// ==============================
+
+// Question types. 'nonsense' rounds are bonus/revival rounds: correct answers
+// give surviving members +1 fruit and bring eliminated members back with 1 fruit.
+// Wrong answers on nonsense rounds do NOT cost a fruit.
+export type QuizQuestionType = "subjective" | "multiple_choice" | "ox" | "nonsense";
+
+// Source of the question: pre-entered by MC, generated from reference text,
+// or generated from general bible knowledge.
+export type QuizQuestionSource = "manual" | "reference" | "bible_general";
+
+export interface QuizQuestion {
+  id: string;
+  type: QuizQuestionType;
+  text: string;
+  // Multiple accepted answers. Comparison is done after trim + lowercase +
+  // whitespace removal, so "사랑" matches both " 사랑 " and "사랑".
+  // For OX, use ["O"] or ["X"]. For multiple_choice, use the choice text(s).
+  answers: string[];
+  // Only for multiple_choice — the 4 options shown to members.
+  choices: string[] | null;
+  source: QuizQuestionSource;
+}
+
+// Per-participant runtime state during the quiz.
+// Indexed by participant.id (uuid) inside QuizState.participants.
+export interface QuizParticipantState {
+  fruits_remaining: number;
+  is_eliminated: boolean;
+  total_correct: number;
+  // Last submitted answer for the current question, if any.
+  // Cleared when MC moves to the next question.
+  current_answer: string | null;
+  // Timestamp of when the current answer was submitted (for tiebreaks
+  // or display order). ISO string.
+  answer_submitted_at: string | null;
+}
+
+// Phase of the current question lifecycle.
+// idle           = no question shown; MC is about to draw one
+// thinking       = question is shown, members are answering, timer running
+// answers_locked = MC has called for everyone to hold up phones
+// revealed       = correct answer is shown; results applied to fruits
+export type QuizPhase = "idle" | "thinking" | "answers_locked" | "revealed";
+
+export interface QuizState {
+  // Settings (set once when the room is created)
+  starting_fruits: number;          // 2~5, default 3
+  reference_text: string;            // Optional sermon/scripture context
+
+  // Current question
+  current_question: QuizQuestion | null;
+  phase: QuizPhase;
+  // ISO timestamp when 'thinking' phase started; clients derive
+  // remaining time from started_at + duration_seconds.
+  thinking_started_at: string | null;
+  thinking_duration_seconds: number; // default 30
+
+  // Per-participant fruit/answer state. Key = participants.id (uuid).
+  participants: Record<string, QuizParticipantState>;
+
+  // Question history — IDs of questions already shown so we don't repeat
+  // when generating from the same reference text pool.
+  used_question_ids: string[];
+
+  // Manually entered question pool (optional, MC can pre-load).
+  // Drawn first when present; falls back to AI generation when empty.
+  manual_pool: QuizQuestion[];
+
+  // Round counter for display (1, 2, 3...)
+  question_number: number;
+
+  // Game-over flag set when only one (or zero) participants remain.
+  ended: boolean;
+}
+
+// Normalize an answer string for comparison: trim, lowercase, collapse
+// internal whitespace. Used both client- and server-side.
+export function normalizeAnswer(raw: string): string {
+  return raw.trim().toLowerCase().replace(/\s+/g, "");
+}
+
+// Check whether a submitted answer matches any of the accepted answers.
+export function isQuizAnswerCorrect(
+  submitted: string,
+  acceptedAnswers: string[],
+): boolean {
+  const norm = normalizeAnswer(submitted);
+  if (!norm) return false;
+  return acceptedAnswers.some((a) => normalizeAnswer(a) === norm);
+}
