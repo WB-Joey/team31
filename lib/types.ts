@@ -23,6 +23,7 @@ export interface Content {
   duration_min: number;
   needs_materials: Materials;
   activity_type: ActivityType;
+  game_type: string | null;
   leader_guide: string;
   member_guide: string;
   winner_formula: string;
