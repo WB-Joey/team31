@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import LeaderAuctionBoard from "@/components/LeaderAuctionBoard";
 import MemberBudgetPanel from "@/components/MemberBudgetPanel";
+import QuizGameView from "@/components/QuizGameView";
 import { getSupabaseClient } from "@/lib/supabase";
 import { useAuctionState } from "@/lib/useAuctionState";
 import { useParticipants } from "@/lib/useParticipants";
@@ -93,7 +94,13 @@ export default function LeaderPlayPage({
       </main>
     );
   }
-
+  
+  // Branch by game_type: 성경퀴즈 quiz games get their own view.
+  // Any other (including 가치관 경매) falls through to the legacy UI below.
+  if (content.game_type === "bible_quiz") {
+    return <QuizGameView sessionId={sessionId} roomCode={roomCode} />;
+  }
+  
   return (
     <main className="min-h-screen px-5 pt-6 pb-12 max-w-xl mx-auto overflow-x-hidden">
       <Link
