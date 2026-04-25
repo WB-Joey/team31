@@ -21,8 +21,6 @@
 
 import type { QuizQuestion, QuizQuestionType } from "@/lib/types";
 
-export const runtime = "edge";
-
 const MODEL = "gemini-2.5-flash-lite";
 
 interface RequestBody {
