@@ -413,7 +413,7 @@ export default function QuizGameView({ sessionId, roomCode }: Props) {
               {questionOnFloor ? "다음 문제 (대기 중)" : "다음 문제"}
             </h2>
             <p className="text-xs text-gray-500 mt-0.5">
-              Claude가 자동으로 만들어줘요. 출제 버튼만 눌러주세요.
+              AI가 자동으로 생성합니다. 출제 버튼만 눌러주세요.
             </p>
           </section>
 
@@ -439,7 +439,7 @@ export default function QuizGameView({ sessionId, roomCode }: Props) {
               <div className="text-center py-4">
                 <div className="text-3xl mb-2 animate-pulse">✨</div>
                 <p className="text-sm font-semibold text-gray-700">
-                  Claude가 문제를 만들고 있어요…
+                  AI가 문제를 만들고 있어요…
                 </p>
                 <p className="mt-1 text-xs text-gray-500">
                   보통 2~5초 정도 걸려요
