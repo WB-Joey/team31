@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import MemberAuctionBoard from "@/components/MemberAuctionBoard";
+import QuizMemberView from "@/components/QuizMemberView";
 import { getSupabaseClient } from "@/lib/supabase";
 import { useAuctionState } from "@/lib/useAuctionState";
 import { useParticipants } from "@/lib/useParticipants";
@@ -95,7 +96,19 @@ export default function MemberPlayPage({
       </main>
     );
   }
-
+  
+// Branch by game_type: 성경퀴즈 quiz games get their own member view.
+  if (content.game_type === "bible_quiz") {
+    return (
+      <QuizMemberView
+        sessionId={sessionId}
+        roomCode={roomCode}
+        myNickname={myNickname}
+        myParticipantId={myParticipantId}
+      />
+    );
+  }
+  
   return (
     <main className="min-h-screen px-5 pt-6 pb-12 max-w-xl mx-auto overflow-x-hidden">
       <div className="flex items-center justify-between">
