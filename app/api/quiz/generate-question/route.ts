@@ -1,30 +1,29 @@
 // POST /api/quiz/generate-question
 //
-// Generates one bible-quiz question via the Anthropic API. The leader's
-// QuizGameView calls this whenever it needs to pre-load the next round.
+// Generates one bible-quiz question via the Google Gemini API. Same external
+// contract as the previous Anthropic version — QuizGameView and the
+// generateQuestion client helper are unchanged.
 //
 // Inputs (JSON body):
-//   referenceText?: string  — optional sermon/scripture context to draw from
-//   priorQuestions?: string[] — texts of previous questions to avoid repeating
-//   forceNonsense?: boolean — when true, returns a "넌센스" round
+//   referenceText?: string
+//   priorQuestions?: string[]
+//   forceNonsense?: boolean
 //
 // Output (JSON):
 //   On success: { question: QuizQuestion }
-//   On error:   { error: string } with appropriate HTTP status
+//   On error:   { error: string }
 //
 // Notes:
-//   - Runs on the Edge runtime for low latency.
-//   - Uses Claude Haiku for speed and cost; questions don't need deep
-//     reasoning, just adherence to a strict JSON schema.
-//   - We ask Claude to return raw JSON only and parse it; if parsing fails
-//     we surface a 502 so the client can retry.
+//   - Uses gemini-2.5-flash-lite for free-tier eligibility (15 RPM, 1000/day).
+//   - Asks the model to return raw JSON; we parse and validate before
+//     returning. We use responseMimeType=application/json to encourage strict
+//     output, which is honored on Gemini 2.5 family models.
 
 import type { QuizQuestion, QuizQuestionType } from "@/lib/types";
 
 export const runtime = "edge";
 
-const MODEL = "claude-haiku-4-5-20251001";
-const MAX_TOKENS = 800;
+const MODEL = "gemini-2.5-flash-lite";
 
 interface RequestBody {
   referenceText?: string;
@@ -32,12 +31,11 @@ interface RequestBody {
   forceNonsense?: boolean;
 }
 
-// Random pick helper.
 function pick<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-function buildSystemPrompt(): string {
+function buildSystemInstruction(): string {
   return [
     "당신은 한국 교회 청년부 모임에서 진행하는 '성경 퀴즈 대회'의 문제 출제자입니다.",
     "한 번에 한 문제만 만들어 JSON 형식으로 반환합니다.",
@@ -46,8 +44,8 @@ function buildSystemPrompt(): string {
     "{",
     '  "type": "subjective" | "multiple_choice" | "ox" | "nonsense",',
     '  "text": "문제 본문 (한국어)",',
-    '  "answers": ["정답1", "정답2", ...],   // 인정되는 모든 정답을 포함',
-    '  "choices": ["보기1", "보기2", "보기3", "보기4"] | null   // multiple_choice일 때만 4개, 그 외엔 null',
+    '  "answers": ["정답1", "정답2", ...],',
+    '  "choices": ["보기1", "보기2", "보기3", "보기4"] | null',
     "}",
     "",
     "주의사항:",
@@ -64,12 +62,10 @@ function buildSystemPrompt(): string {
 
 function buildUserPrompt(body: RequestBody): string {
   const lines: string[] = [];
-  // Bias the type so games feel varied. Caller can force nonsense.
   let type: QuizQuestionType;
   if (body.forceNonsense) {
     type = "nonsense";
   } else {
-    // 60% subjective, 25% multiple_choice, 15% ox — nonsense only on demand.
     const r = Math.random();
     if (r < 0.6) type = "subjective";
     else if (r < 0.85) type = "multiple_choice";
@@ -85,8 +81,6 @@ function buildUserPrompt(body: RequestBody): string {
     lines.push(ref);
     lines.push("---");
   } else {
-    // No reference — pull from the broader bible. Rotate emphasis areas so
-    // questions feel diverse across rounds.
     const focusAreas = [
       "구약 인물(아브라함, 모세, 다윗 등)",
       "신약 인물(예수님의 제자, 사도 바울 등)",
@@ -114,7 +108,6 @@ function buildUserPrompt(body: RequestBody): string {
   return lines.join("\n");
 }
 
-// Strict-ish validator. Coerces obvious shape issues, rejects the rest.
 function validateQuestion(raw: unknown): QuizQuestion | string {
   if (!raw || typeof raw !== "object") return "응답이 객체가 아닙니다.";
   const obj = raw as Record<string, unknown>;
@@ -162,15 +155,15 @@ function validateQuestion(raw: unknown): QuizQuestion | string {
     text,
     answers,
     choices,
-    source: "manual", // overwritten by client based on whether reference was used
+    source: "manual",
   };
 }
 
 export async function POST(request: Request): Promise<Response> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     return Response.json(
-      { error: "ANTHROPIC_API_KEY가 설정되지 않았습니다." },
+      { error: "GEMINI_API_KEY가 설정되지 않았습니다." },
       { status: 500 },
     );
   }
@@ -182,53 +175,68 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ error: "잘못된 요청 본문" }, { status: 400 });
   }
 
-  const apiResponse = await fetch("https://api.anthropic.com/v1/messages", {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${apiKey}`;
+
+  const apiResponse = await fetch(url, {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
+    headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      model: MODEL,
-      max_tokens: MAX_TOKENS,
-      system: buildSystemPrompt(),
-      messages: [{ role: "user", content: buildUserPrompt(body) }],
+      systemInstruction: {
+        parts: [{ text: buildSystemInstruction() }],
+      },
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: buildUserPrompt(body) }],
+        },
+      ],
+      generationConfig: {
+        responseMimeType: "application/json",
+        temperature: 1.0,
+        maxOutputTokens: 800,
+      },
     }),
   });
 
   if (!apiResponse.ok) {
     const errText = await apiResponse.text().catch(() => "");
     return Response.json(
-      { error: `Anthropic API 호출 실패 (${apiResponse.status}): ${errText.slice(0, 300)}` },
+      { error: `Gemini API 호출 실패 (${apiResponse.status}): ${errText.slice(0, 300)}` },
       { status: 502 },
     );
   }
 
   const data = (await apiResponse.json()) as {
-    content?: Array<{ type: string; text?: string }>;
+    candidates?: Array<{
+      content?: { parts?: Array<{ text?: string }> };
+      finishReason?: string;
+    }>;
+    promptFeedback?: { blockReason?: string };
   };
 
-  // Concatenate any text blocks Claude returned.
-  const text = (data.content ?? [])
-    .filter((b) => b.type === "text" && typeof b.text === "string")
-    .map((b) => b.text as string)
+  if (data.promptFeedback?.blockReason) {
+    return Response.json(
+      { error: `Gemini가 요청을 차단함: ${data.promptFeedback.blockReason}` },
+      { status: 502 },
+    );
+  }
+
+  const text = (data.candidates?.[0]?.content?.parts ?? [])
+    .map((p) => p.text ?? "")
     .join("")
     .trim();
 
   if (!text) {
     return Response.json(
-      { error: "Anthropic 응답에 텍스트가 없습니다." },
+      { error: "Gemini 응답에 텍스트가 없습니다." },
       { status: 502 },
     );
   }
 
-  // Try to extract a JSON object even if the model wraps it.
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
-    // Fallback: pull the first {...} block.
     const match = text.match(/\{[\s\S]*\}/);
     if (!match) {
       return Response.json(
@@ -254,7 +262,6 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  // Tag source so the client can show "참고자료 기반" vs "성경 전체" badges.
   const source = (body.referenceText ?? "").trim().length > 0
     ? "reference"
     : "bible_general";
